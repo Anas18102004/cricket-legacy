@@ -33,11 +33,23 @@ typedef struct {
 // If collision occurs with Bionic/Android runtime, gracefully falls back to base-relative mapping.
 bool cricket_memory_init(CricketVirtualArena* arena, size_t arena_size);
 
-// Translates a 32-bit x86 address to a native 64-bit pointer with 32-bit wraparound masking
+// Translates a 32-bit x86 address to a native 64-bit pointer with 32-bit wraparound masking.
+// In ARENA_MODE_FIXED_LOWER_4GB: directly converts offset to pointer, eliminating ISO C null-pointer arithmetic UB.
+// In ARENA_MODE_BASE_OFFSET: applies offset to the non-null base pointer g_mem.
 static inline void* cricket_translate_addr(const CricketVirtualArena* arena, uint32_t x86_addr) {
-    // Mask ensures 32-bit wraparound semantics match original x86 registers
     uintptr_t offset = (uintptr_t)(x86_addr & 0xFFFFFFFFU);
+    if (arena->mode == ARENA_MODE_FIXED_LOWER_4GB) {
+        // Direct integer-to-pointer cast (C11 §6.3.2.3 ¶5). Completely avoids (NULL + offset) arithmetic.
+        return (void*)offset;
+    }
+    // Base-relative: arena->base_address is guaranteed non-NULL
     return (void*)((uint8_t*)arena->base_address + offset);
+}
+
+// Determines whether a 32-bit guest address is safely accessible.
+// The first 64KB (0x00000000 - 0x0000FFFF) is reserved as an unmapped guard page to catch NULL dereferences.
+static inline bool cricket_is_valid_guest_addr(uint32_t x86_addr) {
+    return (x86_addr >= 0x00010000U);
 }
 
 // Fast inline unaligned 32-bit read (avoids function call overhead in tight loops)

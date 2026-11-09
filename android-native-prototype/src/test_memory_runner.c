@@ -109,9 +109,10 @@ static bool test_unaligned_memory(CricketVirtualArena* arena) {
     return true;
 }
 
-// Test 5: 32-bit Address Wraparound
+// Test 5: 32-bit Address Wraparound & Guard Page Protection
 static bool test_address_wraparound(CricketVirtualArena* arena) {
-    printf("[TEST 5] Testing 32-Bit Address Wraparound Semantics...\n");
+    printf("[TEST 5] Testing 32-Bit Address Wraparound & Guard Protection...\n");
+    // Arithmetic wraparound test
     uint32_t base = 0xFFFFFFFC;
     uint32_t offset = 8;
     uint32_t wrapped_addr = (uint32_t)(base + offset); // 0x00000004
@@ -124,8 +125,32 @@ static bool test_address_wraparound(CricketVirtualArena* arena) {
                native_ptr_wrapped, native_ptr_direct);
         return false;
     }
-    printf("  0xFFFFFFFC + 8 wraps to 0x00000004 -> Native Ptr: %p\n", native_ptr_wrapped);
-    printf("  PASS: Address wraparound verified.\n");
+    printf("  0xFFFFFFFC + 8 wraps to 0x%08X (Offset %p)\n", wrapped_addr, native_ptr_wrapped);
+
+    // Guard page verification: ensure address < 0x00010000 is recognized as unmapped
+    if (cricket_is_valid_guest_addr(wrapped_addr)) {
+        printf("  FAIL: Low address 0x%08X was incorrectly flagged as valid guest memory!\n", wrapped_addr);
+        return false;
+    }
+    printf("  Guard Page Check: 0x%08X safely flagged as unmapped/NULL-guard (NO dereference attempted)\n", wrapped_addr);
+
+    // Wraparound into valid mapped space (.text at 0x00400000)
+    uint32_t text_base_wrapped = (uint32_t)(0xFFFFFFFFU + 0x00400001U); // 0x00400000
+    if (!cricket_is_valid_guest_addr(text_base_wrapped)) {
+        printf("  FAIL: Wrapped .text base 0x%08X should be valid!\n", text_base_wrapped);
+        return false;
+    }
+    uint32_t val_written = 0x55AA33CC;
+    cricket_write_u32(arena, text_base_wrapped, val_written);
+    uint32_t val_read = cricket_read_u32(arena, 0x00400000);
+    if (val_read != val_written) {
+        printf("  FAIL: Wrapped address write at 0x%08X read back 0x%08X (expected 0x%08X)\n",
+               text_base_wrapped, val_read, val_written);
+        return false;
+    }
+    printf("  Verified wraparound read/write into valid .text space (0x%08X -> 0x%08X)\n",
+           text_base_wrapped, val_read);
+    printf("  PASS: Address wraparound and guard protection verified.\n");
     return true;
 }
 
@@ -149,9 +174,28 @@ static bool test_ballistic_physics(void) {
     return true;
 }
 
+// Test 8: Memory Lifecycle & Clean Re-initialization
+static bool test_memory_lifecycle(void) {
+    printf("[TEST 8] Testing Memory Cleanup and Safe Re-allocation...\n");
+    CricketVirtualArena temp_arena;
+    if (!cricket_memory_init(&temp_arena, 0x10000000)) { // 256MB test
+        printf("  FAIL: Temporary arena allocation failed!\n");
+        return false;
+    }
+    cricket_write_u32(&temp_arena, 0x00400000, 0x12345678);
+    cricket_memory_cleanup(&temp_arena);
+
+    if (temp_arena.is_initialized || temp_arena.base_address != NULL) {
+        printf("  FAIL: Arena cleanup did not reset fields!\n");
+        return false;
+    }
+    printf("  PASS: Memory cleanup and deallocation verified.\n");
+    return true;
+}
+
 int main(int argc, char** argv) {
     printf("====================================================\n");
-    printf("CRICKET LEGACY — PHASE B.6 NATIVE TEST RUNNER\n");
+    printf("CRICKET LEGACY — PHASE B.7 NATIVE TEST RUNNER\n");
     printf("Architectural & Memory Correctness Verification Suite\n");
     printf("====================================================\n\n");
 
@@ -165,14 +209,15 @@ int main(int argc, char** argv) {
     all_passed &= test_address_wraparound(&arena);
     all_passed &= test_resident_memory_rss();
     all_passed &= test_ballistic_physics();
+    all_passed &= test_memory_lifecycle();
 
     cricket_memory_cleanup(&arena);
 
     printf("\n====================================================\n");
     if (all_passed) {
-        printf("PHASE B.6 TEST RESULT: ALL 7 TESTS PASSED SUCCESSFULLY!\n");
+        printf("PHASE B.7 TEST RESULT: ALL 8 TESTS PASSED SUCCESSFULLY!\n");
     } else {
-        printf("PHASE B.6 TEST RESULT: ONE OR MORE TESTS FAILED!\n");
+        printf("PHASE B.7 TEST RESULT: ONE OR MORE TESTS FAILED!\n");
     }
     printf("====================================================\n");
 

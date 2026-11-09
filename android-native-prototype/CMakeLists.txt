@@ -12,7 +12,10 @@ add_compile_options(
     -fvisibility=default
 )
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
 # Shared Library for Android App (JNI / Activity)
 add_library(cricket_native_harness SHARED
@@ -20,9 +23,15 @@ add_library(cricket_native_harness SHARED
     src/cricket_memory.c
     src/test_physics.c
     src/test_graphics.c
+    src/test_wgpu_render.c
+)
+
+target_link_directories(cricket_native_harness PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/android-app/app/src/main/jniLibs/${ANDROID_ABI}"
 )
 
 target_link_libraries(cricket_native_harness
+    wgpu_native
     android
     vulkan
     log

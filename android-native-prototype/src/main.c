@@ -8,9 +8,11 @@
 #include "cricket_memory.h"
 #include "test_physics.h"
 #include "test_graphics.h"
+#include "test_wgpu_render.h"
 
 #define LOG_TAG "CricketNativeHarness"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static CricketVirtualArena g_arena;
@@ -72,15 +74,28 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessInit(JNIEnv* env, jclass
 // JNI Entry: Set Android Surface for Native Rendering
 JNIEXPORT jboolean JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass clazz, jobject surface) {
-    if (g_native_window) {
-        ANativeWindow_release(g_native_window);
-        g_native_window = NULL;
-    }
-
     if (!surface) {
         LOGI("Surface cleared.");
+        cricket_wgpu_shutdown();
         cricket_graphics_shutdown();
+        if (g_native_window) {
+            ANativeWindow_release(g_native_window);
+            g_native_window = NULL;
+        }
         return JNI_TRUE;
+    }
+
+    const CricketWgpuRenderState* wgpu_state = cricket_wgpu_get_state();
+    if (wgpu_state->is_initialized && g_native_window) {
+        LOGI("WebGPU already initialized on window %p - skipping redundant attachment", g_native_window);
+        return JNI_TRUE;
+    }
+
+    if (g_native_window) {
+        cricket_wgpu_shutdown();
+        cricket_graphics_shutdown();
+        ANativeWindow_release(g_native_window);
+        g_native_window = NULL;
     }
 
     g_native_window = ANativeWindow_fromSurface(env, surface);
@@ -92,14 +107,32 @@ Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass 
     LOGI("Acquired ANativeWindow: %p (Resolution: %dx%d)",
          g_native_window, ANativeWindow_getWidth(g_native_window), ANativeWindow_getHeight(g_native_window));
 
-    // Initialize Vulkan graphics context on native window
+    // 1. Primary path: Initialize wgpu-native WebGPU context
+    LOGI("Attempting WebGPU surface initialization via wgpu-native...");
+    if (cricket_wgpu_init(g_native_window)) {
+        LOGI("WebGPU native initialization SUCCESSFUL!");
+        return JNI_TRUE;
+    }
+
+    LOGW("WebGPU initialization failed. Falling back to direct Vulkan driver harness...");
     return cricket_graphics_init(g_native_window) ? JNI_TRUE : JNI_FALSE;
+}
+
+// JNI Entry: Handle surface resize
+JNIEXPORT void JNICALL
+Java_org_cricketlegacy_MainActivity_nativeCricketResize(JNIEnv* env, jclass clazz, jint width, jint height) {
+    LOGI("nativeCricketResize called: %dx%d", width, height);
+    const CricketWgpuRenderState* wgpu_state = cricket_wgpu_get_state();
+    if (wgpu_state->is_initialized) {
+        cricket_wgpu_resize((uint32_t)width, (uint32_t)height);
+    }
 }
 
 // JNI Entry: Handle surface destroyed
 JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketSurfaceDestroyed(JNIEnv* env, jclass clazz) {
     LOGI("Surface destroyed notification received.");
+    cricket_wgpu_shutdown();
     cricket_graphics_shutdown();
     if (g_native_window) {
         ANativeWindow_release(g_native_window);
@@ -129,16 +162,23 @@ Java_org_cricketlegacy_MainActivity_nativeCricketRenderFrame(JNIEnv* env, jclass
     g_last_frame_time = now;
     g_frame_count++;
 
-    // Render test frame
-    cricket_graphics_render_test_frame();
+    // 1. Primary render path: Render frame through wgpu-native
+    const CricketWgpuRenderState* wgpu_state = cricket_wgpu_get_state();
+    if (wgpu_state->is_initialized) {
+        cricket_wgpu_render_frame();
+    } else {
+        // Fallback
+        cricket_graphics_render_test_frame();
+    }
 
     // Telemetry log every 120 frames (~2 seconds at 60 FPS)
     if (g_frame_count % 120 == 0) {
         float frame_ms = (float)elapsed_ns / 1000000.0f;
         float fps = (frame_ms > 0.001f) ? (1000.0f / frame_ms) : 0.0f;
         size_t rss_kb = cricket_get_resident_memory_kb();
-        LOGI("Telemetry: Frame #%llu | FrameTime: %.2f ms (%.1f FPS) | RAM: %zu KB",
-             (unsigned long long)g_frame_count, frame_ms, fps, rss_kb);
+        LOGI("Telemetry: Frame #%llu | FrameTime: %.2f ms (%.1f FPS) | RAM: %zu KB | GPU: %s",
+             (unsigned long long)g_frame_count, frame_ms, fps, rss_kb,
+             wgpu_state->is_initialized ? wgpu_state->adapter_name : "Direct Vulkan");
     }
 }
 
@@ -154,6 +194,7 @@ JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketHarnessShutdown(JNIEnv* env, jclass clazz) {
     LOGI("Shutting down Cricket Native Harness...");
     g_is_running = false;
+    cricket_wgpu_shutdown();
     cricket_graphics_shutdown();
     if (g_native_window) {
         ANativeWindow_release(g_native_window);

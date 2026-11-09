@@ -20,6 +20,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
 
     static {
         try {
+            System.loadLibrary("wgpu_native");
+            Log.i(TAG, "Successfully loaded native library: libwgpu_native.so");
+        } catch (UnsatisfiedLinkError e) {
+            Log.w(TAG, "libwgpu_native.so direct load warning (linker will resolve automatically): " + e.getMessage());
+        }
+        try {
             System.loadLibrary("cricket_native_harness");
             Log.i(TAG, "Successfully loaded native library: libcricket_native_harness.so");
         } catch (UnsatisfiedLinkError e) {
@@ -30,6 +36,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     // Native JNI Declarations
     public static native boolean nativeCricketHarnessInit();
     public static native boolean nativeCricketSetSurface(Surface surface);
+    public static native void nativeCricketResize(int width, int height);
     public static native void nativeCricketSurfaceDestroyed();
     public static native void nativeCricketOnTouch(int action, float x, float y, int pointerId);
     public static native void nativeCricketRenderFrame();
@@ -114,7 +121,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
         Log.i(TAG, "surfaceChanged: Format=" + format + " Dimensions=" + width + "x" + height);
-        nativeCricketSetSurface(holder.getSurface());
+        nativeCricketResize(width, height);
     }
 
     @Override

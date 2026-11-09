@@ -74,6 +74,8 @@ crashlytics-build.properties
 Thumbs.db
 
 # Native Android Prototype build artifacts
-android-native-prototype/build-arm64/
+android-native-prototype/build-*/
+android-native-prototype/android-app/app/build/
+third_party/
 *.so
 

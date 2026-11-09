@@ -100,13 +100,14 @@ size_t cricket_get_resident_memory_kb(void) {
 }
 
 void cricket_memory_cleanup(CricketVirtualArena* arena) {
-    if (arena && arena->is_initialized && arena->base_address) {
+    if (arena && arena->is_initialized) {
         if (arena->mode == ARENA_MODE_FIXED_LOWER_4GB) {
             munmap((void*)0x00010000, arena->reserved_size - 0x00010000);
-        } else {
+            LOGI("Released Strategy 1 fixed lower 4GB arena at 0x00010000");
+        } else if (arena->base_address != NULL) {
             munmap(arena->base_address, arena->reserved_size);
+            LOGI("Released Strategy 2 virtual memory arena at %p", arena->base_address);
         }
-        LOGI("Released virtual memory arena at %p", arena->base_address);
         arena->base_address = NULL;
         arena->reserved_size = 0;
         arena->mode = ARENA_MODE_UNINITIALIZED;
