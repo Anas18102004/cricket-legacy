@@ -29,9 +29,16 @@ typedef struct {
 } CricketVirtualArena;
 
 // Initializes the 4GB virtual address arena.
+// If arena is NULL, initializes and manages the process-wide default arena.
 // First attempts MAP_FIXED_NOREPLACE at low memory (0x00010000 - 0x100000000ULL).
 // If collision occurs with Bionic/Android runtime, gracefully falls back to base-relative mapping.
 bool cricket_memory_init(CricketVirtualArena* arena, size_t arena_size);
+
+// Gets the process-wide default arena
+CricketVirtualArena* cricket_memory_get_arena(void);
+
+// Gets the base address for HP(addr) (either 0 or Strategy 2 base)
+void* cricket_memory_get_base(void);
 
 // Translates a 32-bit x86 address to a native 64-bit pointer with 32-bit wraparound masking.
 // In ARENA_MODE_FIXED_LOWER_4GB: directly converts offset to pointer, eliminating ISO C null-pointer arithmetic UB.

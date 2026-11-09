@@ -15,8 +15,19 @@
 #define MAP_FIXED_NOREPLACE 0x100000 // Linux 4.17+ flag
 #endif
 
+static CricketVirtualArena g_default_arena = {0};
+
+CricketVirtualArena* cricket_memory_get_arena(void) {
+    return &g_default_arena;
+}
+
+void* cricket_memory_get_base(void) {
+    if (!g_default_arena.is_initialized) return NULL;
+    return g_default_arena.base_address;
+}
+
 bool cricket_memory_init(CricketVirtualArena* arena, size_t arena_size) {
-    if (!arena) return false;
+    if (!arena) arena = &g_default_arena;
     
     // Default to 4GB virtual address arena
     if (arena_size == 0) {

@@ -9,6 +9,8 @@
 #include "test_physics.h"
 #include "test_graphics.h"
 #include "test_wgpu_render.h"
+#include "upstream_d3d8/d3d8_android_adapter.h"
+#include "test_d3d8_scene.h"
 
 #define LOG_TAG "CricketNativeHarness"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -76,6 +78,8 @@ JNIEXPORT jboolean JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass clazz, jobject surface) {
     if (!surface) {
         LOGI("Surface cleared.");
+        test_d3d8_scene_shutdown();
+        d3d8_android_shutdown();
         cricket_wgpu_shutdown();
         cricket_graphics_shutdown();
         if (g_native_window) {
@@ -85,13 +89,15 @@ Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass 
         return JNI_TRUE;
     }
 
-    const CricketWgpuRenderState* wgpu_state = cricket_wgpu_get_state();
-    if (wgpu_state->is_initialized && g_native_window) {
-        LOGI("WebGPU already initialized on window %p - skipping redundant attachment", g_native_window);
+    const D3D8AndroidState* d3d_state = d3d8_android_get_state();
+    if (d3d_state->is_initialized && g_native_window) {
+        LOGI("Direct3D 8 already initialized on window %p - skipping redundant attachment", g_native_window);
         return JNI_TRUE;
     }
 
     if (g_native_window) {
+        test_d3d8_scene_shutdown();
+        d3d8_android_shutdown();
         cricket_wgpu_shutdown();
         cricket_graphics_shutdown();
         ANativeWindow_release(g_native_window);
@@ -107,10 +113,21 @@ Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass 
     LOGI("Acquired ANativeWindow: %p (Resolution: %dx%d)",
          g_native_window, ANativeWindow_getWidth(g_native_window), ANativeWindow_getHeight(g_native_window));
 
-    // 1. Primary path: Initialize wgpu-native WebGPU context
-    LOGI("Attempting WebGPU surface initialization via wgpu-native...");
+    // Phase C.1 Primary path: Direct3D 8 Engine Integration with WebGPU Backend
+    LOGI("Initializing Direct3D 8 WebGPU Android Adapter...");
+    if (d3d8_android_init(g_native_window)) {
+        LOGI("D3D8 Android Adapter initialized successfully! Initializing 3D validation scene...");
+        if (test_d3d8_scene_init()) {
+            LOGI("Phase C.1 Direct3D 8 3D Validation Scene initialized and ready to render!");
+            return JNI_TRUE;
+        } else {
+            LOGE("D3D8 test scene initialization failed!");
+            return JNI_FALSE;
+        }
+    }
+
+    LOGW("D3D8 initialization failed. Falling back to wgpu-native harness...");
     if (cricket_wgpu_init(g_native_window)) {
-        LOGI("WebGPU native initialization SUCCESSFUL!");
         return JNI_TRUE;
     }
 
@@ -122,6 +139,11 @@ Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass 
 JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketResize(JNIEnv* env, jclass clazz, jint width, jint height) {
     LOGI("nativeCricketResize called: %dx%d", width, height);
+    const D3D8AndroidState* d3d_state = d3d8_android_get_state();
+    if (d3d_state && d3d_state->is_initialized) {
+        d3d8_android_resize((uint32_t)width, (uint32_t)height);
+        return;
+    }
     const CricketWgpuRenderState* wgpu_state = cricket_wgpu_get_state();
     if (wgpu_state->is_initialized) {
         cricket_wgpu_resize((uint32_t)width, (uint32_t)height);
@@ -132,6 +154,8 @@ Java_org_cricketlegacy_MainActivity_nativeCricketResize(JNIEnv* env, jclass claz
 JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketSurfaceDestroyed(JNIEnv* env, jclass clazz) {
     LOGI("Surface destroyed notification received.");
+    test_d3d8_scene_shutdown();
+    d3d8_android_shutdown();
     cricket_wgpu_shutdown();
     cricket_graphics_shutdown();
     if (g_native_window) {
@@ -162,23 +186,32 @@ Java_org_cricketlegacy_MainActivity_nativeCricketRenderFrame(JNIEnv* env, jclass
     g_last_frame_time = now;
     g_frame_count++;
 
-    // 1. Primary render path: Render frame through wgpu-native
-    const CricketWgpuRenderState* wgpu_state = cricket_wgpu_get_state();
-    if (wgpu_state->is_initialized) {
-        cricket_wgpu_render_frame();
+    // 1. Primary render path: Direct3D 8 Engine
+    const D3D8AndroidState* d3d_state = d3d8_android_get_state();
+    if (d3d_state && d3d_state->is_initialized) {
+        d3d8_android_render_frame();
     } else {
-        // Fallback
-        cricket_graphics_render_test_frame();
+        const CricketWgpuRenderState* wgpu_state = cricket_wgpu_get_state();
+        if (wgpu_state->is_initialized) {
+            cricket_wgpu_render_frame();
+        } else {
+            cricket_graphics_render_test_frame();
+        }
     }
 
-    // Telemetry log every 120 frames (~2 seconds at 60 FPS)
-    if (g_frame_count % 120 == 0) {
+    // Telemetry log every 60 frames (~1 second at 60 FPS)
+    if (g_frame_count % 60 == 0) {
         float frame_ms = (float)elapsed_ns / 1000000.0f;
         float fps = (frame_ms > 0.001f) ? (1000.0f / frame_ms) : 0.0f;
         size_t rss_kb = cricket_get_resident_memory_kb();
-        LOGI("Telemetry: Frame #%llu | FrameTime: %.2f ms (%.1f FPS) | RAM: %zu KB | GPU: %s",
-             (unsigned long long)g_frame_count, frame_ms, fps, rss_kb,
-             wgpu_state->is_initialized ? wgpu_state->adapter_name : "Direct Vulkan");
+        if (d3d_state && d3d_state->is_initialized) {
+            LOGI("D3D8 Telemetry: Frame #%u | FrameTime: %.2f ms (%.1f FPS) | Total Draws: %u | GPU Tex: %zu KB | Pipelines: %u | RAM: %zu KB",
+                 d3d_state->frame_count, frame_ms, fps, d3d_state->total_draws,
+                 d3d_state->gpu_tex_bytes / 1024, d3d_state->pipelines_made, rss_kb);
+        } else {
+            LOGI("Telemetry: Frame #%llu | FrameTime: %.2f ms (%.1f FPS) | RAM: %zu KB",
+                 (unsigned long long)g_frame_count, frame_ms, fps, rss_kb);
+        }
     }
 }
 
@@ -194,6 +227,8 @@ JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketHarnessShutdown(JNIEnv* env, jclass clazz) {
     LOGI("Shutting down Cricket Native Harness...");
     g_is_running = false;
+    test_d3d8_scene_shutdown();
+    d3d8_android_shutdown();
     cricket_wgpu_shutdown();
     cricket_graphics_shutdown();
     if (g_native_window) {

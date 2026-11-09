@@ -10,10 +10,13 @@ add_compile_options(
     -Wall
     -fno-strict-aliasing
     -fvisibility=default
+    -Wno-unused-function
+    -Wno-unused-variable
 )
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/upstream_d3d8
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
@@ -24,6 +27,16 @@ add_library(cricket_native_harness SHARED
     src/test_physics.c
     src/test_graphics.c
     src/test_wgpu_render.c
+    src/upstream_d3d8/com.c
+    src/upstream_d3d8/d3d8.c
+    src/upstream_d3d8/upstream_core.c
+    src/upstream_d3d8/texconv.c
+    src/upstream_d3d8/vshader.c
+    src/upstream_d3d8/pshader.c
+    src/upstream_d3d8/render_rec.c
+    src/upstream_d3d8/render_wgpu.c
+    src/upstream_d3d8/d3d8_android_adapter.c
+    src/test_d3d8_scene.c
 )
 
 target_link_directories(cricket_native_harness PRIVATE
@@ -36,6 +49,7 @@ target_link_libraries(cricket_native_harness
     vulkan
     log
     m
+    z
 )
 
 # Standalone Test Runner Executable (direct CLI / adb execution)
