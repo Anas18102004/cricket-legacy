@@ -14,6 +14,7 @@ add_compile_options(
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+# Shared Library for Android App (JNI / Activity)
 add_library(cricket_native_harness SHARED
     src/main.c
     src/cricket_memory.c
@@ -21,14 +22,22 @@ add_library(cricket_native_harness SHARED
     src/test_graphics.c
 )
 
-# Link Android system libraries:
-# - android: ANativeWindow and Native Activity integration
-# - vulkan: Hardware-accelerated Vulkan 1.1+ driver interface
-# - log: Android Logcat (__android_log_print)
-# - m: Math library
 target_link_libraries(cricket_native_harness
     android
     vulkan
+    log
+    m
+)
+
+# Standalone Test Runner Executable (direct CLI / adb execution)
+add_executable(cricket_test_runner
+    src/test_memory_runner.c
+    src/cricket_memory.c
+    src/test_physics.c
+)
+
+target_link_libraries(cricket_test_runner
+    android
     log
     m
 )

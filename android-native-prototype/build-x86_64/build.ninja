@@ -101,6 +101,54 @@ build libcricket_native_harness.so: C_SHARED_LIBRARY_LINKER__cricket_native_harn
   TARGET_FILE = libcricket_native_harness.so
   TARGET_PDB = cricket_native_harness.so.dbg
 
+# =============================================================================
+# Object build statements for EXECUTABLE target cricket_test_runner
+
+
+#############################################
+# Order-only phony target for cricket_test_runner
+
+build cmake_object_order_depends_target_cricket_test_runner: phony || CMakeFiles/cricket_test_runner.dir
+
+build CMakeFiles/cricket_test_runner.dir/src/test_memory_runner.c.o: C_COMPILER__cricket_test_runner_Release D$:/cricket07$ mobile$ app/android-native-prototype/src/test_memory_runner.c || cmake_object_order_depends_target_cricket_test_runner
+  DEP_FILE = CMakeFiles\cricket_test_runner.dir\src\test_memory_runner.c.o.d
+  FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -O3 -DNDEBUG  -fPIE -O2 -Wall -fno-strict-aliasing -fvisibility=default -std=gnu11
+  INCLUDES = -I"D:/cricket07 mobile app/android-native-prototype/src"
+  OBJECT_DIR = CMakeFiles\cricket_test_runner.dir
+  OBJECT_FILE_DIR = CMakeFiles\cricket_test_runner.dir\src
+
+build CMakeFiles/cricket_test_runner.dir/src/cricket_memory.c.o: C_COMPILER__cricket_test_runner_Release D$:/cricket07$ mobile$ app/android-native-prototype/src/cricket_memory.c || cmake_object_order_depends_target_cricket_test_runner
+  DEP_FILE = CMakeFiles\cricket_test_runner.dir\src\cricket_memory.c.o.d
+  FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -O3 -DNDEBUG  -fPIE -O2 -Wall -fno-strict-aliasing -fvisibility=default -std=gnu11
+  INCLUDES = -I"D:/cricket07 mobile app/android-native-prototype/src"
+  OBJECT_DIR = CMakeFiles\cricket_test_runner.dir
+  OBJECT_FILE_DIR = CMakeFiles\cricket_test_runner.dir\src
+
+build CMakeFiles/cricket_test_runner.dir/src/test_physics.c.o: C_COMPILER__cricket_test_runner_Release D$:/cricket07$ mobile$ app/android-native-prototype/src/test_physics.c || cmake_object_order_depends_target_cricket_test_runner
+  DEP_FILE = CMakeFiles\cricket_test_runner.dir\src\test_physics.c.o.d
+  FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -O3 -DNDEBUG  -fPIE -O2 -Wall -fno-strict-aliasing -fvisibility=default -std=gnu11
+  INCLUDES = -I"D:/cricket07 mobile app/android-native-prototype/src"
+  OBJECT_DIR = CMakeFiles\cricket_test_runner.dir
+  OBJECT_FILE_DIR = CMakeFiles\cricket_test_runner.dir\src
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target cricket_test_runner
+
+
+#############################################
+# Link the executable cricket_test_runner
+
+build cricket_test_runner: C_EXECUTABLE_LINKER__cricket_test_runner_Release CMakeFiles/cricket_test_runner.dir/src/test_memory_runner.c.o CMakeFiles/cricket_test_runner.dir/src/cricket_memory.c.o CMakeFiles/cricket_test_runner.dir/src/test_physics.c.o
+  FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -O3 -DNDEBUG
+  LINK_FLAGS = -static-libstdc++ -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments   -Wl,--gc-sections
+  LINK_LIBRARIES = -landroid  -llog  -lm  -latomic -lm
+  OBJECT_DIR = CMakeFiles\cricket_test_runner.dir
+  POST_BUILD = cd .
+  PRE_LINK = cd .
+  TARGET_FILE = cricket_test_runner
+  TARGET_PDB = cricket_test_runner.dbg
+
 
 #############################################
 # Utility command for edit_cache
@@ -137,7 +185,7 @@ build cricket_native_harness: phony libcricket_native_harness.so
 #############################################
 # Folder: D:/cricket07 mobile app/android-native-prototype/build-x86_64
 
-build all: phony libcricket_native_harness.so
+build all: phony libcricket_native_harness.so cricket_test_runner
 
 # =============================================================================
 # Built-in targets
