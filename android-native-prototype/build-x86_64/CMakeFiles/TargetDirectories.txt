@@ -1,0 +1,3 @@
+D:/cricket07 mobile app/android-native-prototype/build-x86_64/CMakeFiles/cricket_native_harness.dir
+D:/cricket07 mobile app/android-native-prototype/build-x86_64/CMakeFiles/edit_cache.dir
+D:/cricket07 mobile app/android-native-prototype/build-x86_64/CMakeFiles/rebuild_cache.dir

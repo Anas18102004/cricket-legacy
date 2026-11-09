@@ -1,0 +1,9 @@
+# ninja log v5
+43	415	8159467643200629	CMakeFiles/cricket_native_harness.dir/src/test_physics.c.o	f4cacb2347e39ab9
+0	432	8159467643200629	CMakeFiles/cricket_native_harness.dir/src/main.c.o	332e6895147141f5
+23	511	8159467643848226	CMakeFiles/cricket_native_harness.dir/src/cricket_memory.c.o	261261cde1704ec4
+515	975	8159467648678509	libcricket_native_harness.so	c19374c9ec34505
+4	331	8159469073793572	build.ninja	acd0118e62a01487
+5	330	8159469078125236	CMakeFiles/cricket_native_harness.dir/src/main.c.o	332e6895147141f5
+25	466	8159469079656687	CMakeFiles/cricket_native_harness.dir/src/test_graphics.c.o	47f3c75efc8de84f
+469	890	8159469084049306	libcricket_native_harness.so	8b0761b51eaf0789

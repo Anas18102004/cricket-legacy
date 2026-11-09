@@ -18,10 +18,17 @@ add_library(cricket_native_harness SHARED
     src/main.c
     src/cricket_memory.c
     src/test_physics.c
+    src/test_graphics.c
 )
 
-# Link Android system libraries: logcat (__android_log_print) and math library (libm)
+# Link Android system libraries:
+# - android: ANativeWindow and Native Activity integration
+# - vulkan: Hardware-accelerated Vulkan 1.1+ driver interface
+# - log: Android Logcat (__android_log_print)
+# - m: Math library
 target_link_libraries(cricket_native_harness
+    android
+    vulkan
     log
     m
 )
