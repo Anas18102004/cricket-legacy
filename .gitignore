@@ -72,3 +72,8 @@ crashlytics-build.properties
 # OS generated
 .DS_Store
 Thumbs.db
+
+# Native Android Prototype build artifacts
+android-native-prototype/build-arm64/
+*.so
+
