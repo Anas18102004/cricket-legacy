@@ -2,6 +2,7 @@
  * Drawing goes to g_render (headless by default). */
 #include "d3d8.h"
 #include "render.h"
+#include <android/log.h>
 
 #include <math.h>
 #include <pthread.h>
@@ -198,6 +199,8 @@ W(d3d_CreateDevice) {
     d->hwnd = R32(pp + 24) ? R32(pp + 24) : ARG(3);
     d->msaa = msaa_samples(R32(pp + 16));
     d->d3d = THIS;
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-D3D8", "[d3d] CreateDevice: %ux%u fmt %u backend=%s", d->width, d->height, d->backbuffer_format, g_render->name);
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-D3D8", "[d3d] CreateDevice: %ux%u fmt %u backend=%s", d->width, d->height, d->backbuffer_format, g_render->name);
     fprintf(stderr, "[d3d] CreateDevice: %ux%u fmt %u, %s, backbuffers %u, multisample %u, swap %u, depth %u, "
             "behavior %x, flags %x (params at %08x)\n", d->width, d->height, d->backbuffer_format, d->windowed ? "windowed" : "fullscreen",
             R32(pp + 12), R32(pp + 16), R32(pp + 20), d->depth_format, ARG(4), R32(pp + 40), pp);
@@ -264,7 +267,8 @@ static const ComMethod d3d_methods[] = {
 static ComInterface IDirect3D8_i = { "IDirect3D8", d3d_methods, 16, 0 };
 
 void w_Direct3DCreate8(CPU *c) {
-    fprintf(stderr, "[d3d] Direct3DCreate8(%u) -> headless Direct3D 8 (%s backend)\n", ARG(0), g_render->name);
+    fprintf(stderr, "[d3d] Direct3DCreate8(%u) -> backend: %s\n", ARG(0), g_render->name);
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-D3D8", "[d3d] Direct3DCreate8(%u) -> backend: %s", ARG(0), g_render->name);
     g_d3d_object = com_new(&IDirect3D8_i, RT_D3D, NULL);  /* the game creates one, releases it, creates another */
     RET(1, g_d3d_object);
 }
@@ -451,6 +455,8 @@ W(dev_Present) {
         last_t = now; last_f = d->frame;
     }
     if (g_render->present) g_render->present(d);
+    if (d->frame % 60 == 0) __android_log_print(ANDROID_LOG_INFO, "Cricket-D3D8", "[d3d] Present: frame %u, %u draws", d->frame, d->draws_this_frame);
+    if (d->frame % 60 == 0) __android_log_print(ANDROID_LOG_INFO, "Cricket-D3D8", "[d3d] Present: frame %u, %u draws", d->frame, d->draws_this_frame);
     if (g_log_d3d && (d->frame <= 3 || d->frame % 300 == 0))
         fprintf(stderr, "[d3d] Present: frame %u, %u draws\n", d->frame, d->draws_this_frame);
     d->draws_this_frame = 0;

@@ -8,6 +8,7 @@
  * One WGSL "uber shader" implements Direct3D 8's fixed-function stages; ps.1.1 pixel shaders are
  * translated to WGSL (pshader.c). Pipelines are cached by render state; textures are RGBA8 by id. */
 #include "render.h"
+#include <android/log.h>
 #include "render_cmd.h"
 
 #include <math.h>
@@ -227,23 +228,44 @@ static void obj_del(uint32_t id) {
 
 /* ------------------------------------------------------------------ init */
 
+static void wgpu_log_cb(WGPULogLevel level, char const *message, void *userdata) {
+    (void)userdata;
+    __android_log_print(ANDROID_LOG_INFO, "WGPU-Core", "[%d] %s", (int)level, message ? message : "");
+}
+
+static volatile int s_adapter_done = 0;
 static void on_adapter(WGPURequestAdapterStatus st, WGPUAdapter a, char const *msg, void *u1) {
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "on_adapter callback status=%d adapter=%p msg=%s", (int)st, a, msg ? msg : "none");
     if (st != WGPURequestAdapterStatus_Success) fprintf(stderr, "[wgpu] adapter: %s\n", msg ? msg : "unknown");
     *(WGPUAdapter *)u1 = a;
+    s_adapter_done = 1;
 }
+
+static volatile int s_device_done = 0;
 static void on_device(WGPURequestDeviceStatus st, WGPUDevice d, char const *msg, void *u1) {
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "on_device callback status=%d device=%p msg=%s", (int)st, d, msg ? msg : "none");
     if (st != WGPURequestDeviceStatus_Success) fprintf(stderr, "[wgpu] device: %s\n", msg ? msg : "unknown");
     *(WGPUDevice *)u1 = d;
+    s_device_done = 1;
 }
 static void on_error(WGPUErrorType t, char const *msg, void *u1) {
     (void)u1;
     static int count;
-    if (count++ < 20) fprintf(stderr, "[wgpu] error %d: %s\n", (int)t, msg ? msg : "none");
+    if (count++ < 50) {
+        fprintf(stderr, "[wgpu] error %d: %s\n", (int)t, msg ? msg : "none");
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_ERROR, "Cricket-WGPU", "[wgpu error %d] %s", (int)t, msg ? msg : "none");
+#endif
+    }
 }
 
 static void make_depth(void) {
+    if (!g_dev) return;
     if (g_bb) { release_view(g_bb_view); wgpuTextureRelease(g_bb); }
     WGPUTextureDescriptor bd = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    bd.dimension = WGPUTextureDimension_2D;
+    bd.mipLevelCount = 1;
+    bd.sampleCount = 1;
     bd.size = (WGPUExtent3D){ (uint32_t)g_surf_w, (uint32_t)g_surf_h, 1 };
     bd.format = g_surf_fmt;
     bd.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
@@ -251,6 +273,9 @@ static void make_depth(void) {
     g_bb_view = wgpuTextureCreateView(g_bb, NULL);
     if (g_depth) { release_view(g_depth_view); wgpuTextureRelease(g_depth); }
     WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    td.dimension = WGPUTextureDimension_2D;
+    td.mipLevelCount = 1;
+    td.sampleCount = 1;
     td.size = (WGPUExtent3D){ (uint32_t)g_surf_w, (uint32_t)g_surf_h, 1 };
     td.format = WGPUTextureFormat_Depth24PlusStencil8;
     td.usage = WGPUTextureUsage_RenderAttachment;
@@ -277,6 +302,7 @@ static int widescreen(void) {
 float render_aspect(void) { return g_surf_w > 0 && g_surf_h > 0 ? (float)g_surf_w / (float)g_surf_h : 4.f / 3.f; }
 
 void configure_surface(void) {
+    if (!g_dev) return;
     g_win_w = g_window_w > 0 ? g_window_w : 1024;
     g_win_h = g_window_h > 0 ? g_window_h : 768;
     if (g_win_w * 3 > g_win_h * 4 && !widescreen()) { g_surf_h = g_win_h; g_surf_w = g_win_h * 4 / 3; }
@@ -289,6 +315,11 @@ void configure_surface(void) {
     if (caps.alphaModeCount > 0) alpha_mode = caps.alphaModes[0];
     WGPUPresentMode present_mode = WGPUPresentMode_Fifo;
     if (caps.presentModeCount > 0) present_mode = caps.presentModes[0];
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU",
+        "configure_surface: win=%dx%d surf=%dx%d, caps: usages=0x%08x, nfmt=%zu, g_surf_fmt=%d",
+        g_win_w, g_win_h, g_surf_w, g_surf_h, (uint32_t)caps.usages, caps.formatCount, g_surf_fmt);
+#endif
 
     WGPUSurfaceConfiguration sc = {
         .nextInChain = NULL,
@@ -308,6 +339,9 @@ void configure_surface(void) {
 
 static void make_solid(GTex *g, uint8_t v) {
     WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    td.dimension = WGPUTextureDimension_2D;
+    td.mipLevelCount = 1;
+    td.sampleCount = 1;
     td.size = (WGPUExtent3D){ 1, 1, 1 };
     td.format = WGPUTextureFormat_RGBA8Unorm;
     td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
@@ -411,6 +445,7 @@ ANativeWindow *g_android_native_window = NULL;
 #endif
 
 int gpu_init_native(void) {
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "gpu_init_native called: window=%p, dev=%p", g_android_native_window, g_dev);
     if (g_dev) return 1;
 #ifdef __ANDROID__
     if (!g_android_native_window && !getenv("RC_OFFSCREEN")) { fprintf(stderr, "[wgpu] no android window\n"); return 0; }
@@ -441,14 +476,39 @@ int gpu_init_native(void) {
     }
 #endif
 
+    wgpuSetLogCallback(wgpu_log_cb, NULL);
+    wgpuSetLogLevel(WGPULogLevel_Info);
+
     WGPURequestAdapterOptions ao = {
         .nextInChain = NULL,
         .compatibleSurface = g_surface,
         .powerPreference = WGPUPowerPreference_HighPerformance,
         .forceFallbackAdapter = false
     };
+
+    s_adapter_done = 0;
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "Calling wgpuInstanceRequestAdapter...");
     wgpuInstanceRequestAdapter(g_inst, &ao, on_adapter, &g_adapter);
-    while (!g_adapter) wgpuInstanceProcessEvents(g_inst);
+    int wait_cnt = 0;
+    while (!s_adapter_done && wait_cnt < 200) {
+        wgpuInstanceProcessEvents(g_inst);
+        usleep(2000);
+        wait_cnt++;
+    }
+    if (!g_adapter) {
+        __android_log_print(ANDROID_LOG_WARN, "Cricket-WGPU", "Adapter with surface failed, retrying without compatibleSurface...");
+        ao.compatibleSurface = NULL;
+        ao.powerPreference = WGPUPowerPreference_Undefined;
+        s_adapter_done = 0;
+        wgpuInstanceRequestAdapter(g_inst, &ao, on_adapter, &g_adapter);
+        wait_cnt = 0;
+        while (!s_adapter_done && wait_cnt < 200) {
+            wgpuInstanceProcessEvents(g_inst);
+            usleep(2000);
+            wait_cnt++;
+        }
+    }
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "Acquired WGPUAdapter: %p", g_adapter);
 
     WGPUDeviceDescriptor dd = {
         .nextInChain = NULL,
@@ -463,13 +523,25 @@ int gpu_init_native(void) {
         }
     };
     static const WGPUFeatureName bc = WGPUFeatureName_TextureCompressionBC;
-    g_gpu_bc = wgpuAdapterHasFeature(g_adapter, bc) && !getenv("RC_NO_BC");
+    g_gpu_bc = g_adapter ? (wgpuAdapterHasFeature(g_adapter, bc) && !getenv("RC_NO_BC")) : 0;
     if (g_gpu_bc) { dd.requiredFeatureCount = 1; dd.requiredFeatures = &bc; }
     fprintf(stderr, "[wgpu] BC texture compression: %s\n", g_gpu_bc ? "yes" : "no (DXT textures are converted to RGBA8)");
-    wgpuAdapterRequestDevice(g_adapter, &dd, on_device, &g_dev);
-    while (!g_dev) wgpuInstanceProcessEvents(g_inst);
+
+    s_device_done = 0;
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "Calling wgpuAdapterRequestDevice...");
+    if (g_adapter) {
+        wgpuAdapterRequestDevice(g_adapter, &dd, on_device, &g_dev);
+        wait_cnt = 0;
+        while (!s_device_done && wait_cnt < 200) {
+            wgpuInstanceProcessEvents(g_inst);
+            usleep(2000);
+            wait_cnt++;
+        }
+    }
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "Acquired WGPUDevice: %p", g_dev);
     g_queue = wgpuDeviceGetQueue(g_dev);
     create_resources();
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "gpu_init_native COMPLETE: dev=%p, queue=%p, surface=%p", g_dev, g_queue, g_surface);
     return 1;
 }
 #endif
@@ -543,10 +615,15 @@ static void capture_png(const char *path) {
     wgpuCommandEncoderRelease(enc);
     g_map_done = 0;
     wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, bd.size, on_mapped, NULL);
-    while (!g_map_done) wgpuInstanceProcessEvents(g_inst);
+    while (!g_map_done) {
+        wgpuDevicePoll(g_dev, true, NULL);
+    }
     const uint8_t *data = wgpuBufferGetConstMappedRange(buf, 0, bd.size);
     write_png(path, data, w, h, stride);
     fprintf(stderr, "[wgpu] screenshot %s\n", path);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "[capture_png] Wrote backbuffer screenshot to %s (%ux%u)", path, w, h);
+#endif
     wgpuBufferUnmap(buf);
     wgpuBufferDestroy(buf);
     wgpuBufferRelease(buf);
@@ -570,6 +647,7 @@ static WGPUSampler sampler_for(uint32_t key) {
     sd.lodMaxClamp = mip ? 32.f : 0.f;
     sd.addressModeU = addr_mode(au);
     sd.addressModeV = addr_mode(av);
+    sd.maxAnisotropy = 1;
     g_samplers[key] = wgpuDeviceCreateSampler(g_dev, &sd);
     return g_samplers[key];
 }
@@ -892,6 +970,7 @@ static void begin_pass(uint32_t clear, uint32_t color, float z, uint32_t stencil
     end_pass();
     if (!g_enc) g_enc = wgpuDeviceCreateCommandEncoder(g_dev, NULL);
     WGPURenderPassColorAttachment ca = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
     ca.view = g_tgt_color ? g_tgt_color : g_bb_view;
     ca.loadOp = (clear & 1) ? WGPULoadOp_Clear : WGPULoadOp_Load;
     ca.storeOp = WGPUStoreOp_Store;
@@ -944,6 +1023,9 @@ static WGPUTextureView scratch_depth(uint32_t w, uint32_t h) {
     for (int i = 0; i < 8; i++)
         if (!cache[i].t) {
             WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+            td.dimension = WGPUTextureDimension_2D;
+            td.mipLevelCount = 1;
+            td.sampleCount = 1;
             td.size = (WGPUExtent3D){ w, h, 1 };
             td.format = WGPUTextureFormat_Depth24PlusStencil8;
             td.usage = WGPUTextureUsage_RenderAttachment;
@@ -1062,10 +1144,12 @@ static void exec_upload_tex(const CmdUploadTex *c) {
     if (!g) {
         g = calloc(1, sizeof *g);
         WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        td.dimension = WGPUTextureDimension_2D;
+        td.sampleCount = 1;
         td.size = (WGPUExtent3D){ c->w[0], c->h_[0], 1 };
         td.format = formats[c->fmt & 3];
         td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
-        td.mipLevelCount = c->levels;
+        td.mipLevelCount = c->levels ? c->levels : 1;
         g->tex = wgpuDeviceCreateTexture(g_dev, &td);
         g->view = wgpuTextureCreateView(g->tex, NULL);
         g->w = c->w[0]; g->h = c->h_[0]; g->levels = c->levels; g->fmt = c->fmt;
@@ -1323,6 +1407,13 @@ static void exec_present(const CmdPresent *c) {
     if (!g_pass && !g_enc) begin_pass(1, 0, 1.f, 0);   /* nothing drawn: present black */
     submit();
 #ifndef __EMSCRIPTEN__
+#ifdef __ANDROID__
+    if (c->frame > 0 && (c->frame % 180 == 0 || c->frame == 60)) {
+        capture_png("/data/data/org.cricketlegacy/files/game/bb_dump.png");
+    }
+#endif
+#endif
+#ifndef __EMSCRIPTEN__
     if (c->screenshot) {   /* RC_SCREENSHOT_DIR overrides /tmp */
         const char *dir = getenv("RC_SCREENSHOT_DIR");
         char path[1024];
@@ -1344,11 +1435,19 @@ static void exec_present(const CmdPresent *c) {
     /* copy the back buffer to the window */
     WGPUSurfaceTexture cur = WGPU_SURFACE_TEXTURE_INIT;
     wgpuSurfaceGetCurrentTexture(g_surface, &cur);
+#ifdef __ANDROID__
+    static uint32_t s_log_pres_cnt = 0;
+    if (s_log_pres_cnt++ % 60 == 0) {
+        __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "exec_present frame %u: cur.status=0x%08x, surface=%p, dev=%p, win=%dx%d",
+            c->frame, (uint32_t)cur.status, g_surface, g_dev, g_win_w, g_win_h);
+    }
+#endif
     if (cur.status == WGPUSurfaceGetCurrentTextureStatus_Success) {
         WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_dev, NULL);
         if (g_win_w != g_surf_w || g_win_h != g_surf_h) {   /* black bars around the 4:3 picture */
             WGPUTextureView v = wgpuTextureCreateView(cur.texture, NULL);
             WGPURenderPassColorAttachment ca = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+            ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
             ca.view = v; ca.loadOp = WGPULoadOp_Clear; ca.storeOp = WGPUStoreOp_Store;
             ca.clearValue = (WGPUColor){ 0, 0, 0, 1 };
             WGPURenderPassDescriptor rp = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
@@ -1521,6 +1620,7 @@ static void on_web_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringVi
     g_dev = d;
     g_queue = wgpuDeviceGetQueue(g_dev);
     create_resources();
+    __android_log_print(ANDROID_LOG_INFO, "Cricket-WGPU", "gpu_init_native COMPLETE: dev=%p, queue=%p, surface=%p", g_dev, g_queue, g_surface);
     __atomic_store_n(&g_ready, 1, __ATOMIC_RELEASE);
 }
 
