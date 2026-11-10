@@ -23,7 +23,6 @@ uint32_t g_det_reads = 0;
 
 double guest_peek_seconds(void) { return host_seconds(); }
 void guest_mem_ranges(uint32_t r[4]) { r[0] = r[1] = r[2] = r[3] = 0; }
-uint32_t guest_view_end(uint32_t a) { (void)a; return 0; }
 int refresh_hz(void) { return 60; }
 void watch_arm(uint32_t addr) { (void)addr; }
 
@@ -35,6 +34,7 @@ typedef struct {
 static DynImportSlot g_dyn_imports[MAX_DYN_IMPORTS];
 static uint32_t g_num_dyn_imports = 0;
 __thread uint32_t g_import_target = 0;
+__thread GuestThread *t_self = NULL;
 
 // g_palettes defined in d3d8.c
 

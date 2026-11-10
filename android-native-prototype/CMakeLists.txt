@@ -39,6 +39,10 @@ add_library(cricket_native_harness SHARED
     src/test_d3d8_scene.c
     src/game_static_data.c
     src/test_stage1_memory.c
+    src/game_file_io.c
+    src/game_timers.c
+    src/game_lazy_views.c
+    src/test_stage2_io_timers.c
 )
 
 target_link_directories(cricket_native_harness PRIVATE
