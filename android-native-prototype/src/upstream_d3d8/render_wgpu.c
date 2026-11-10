@@ -162,7 +162,7 @@ static WGPUDevice g_dev;
 static WGPUQueue g_queue;
 static WGPUSurface g_surface;
 static WGPUTextureFormat g_surf_fmt;
-static int g_surf_w, g_surf_h;   /* back buffer: the largest 4:3 area that fits the window, or all of a wide one */
+int g_surf_w, g_surf_h;   /* back buffer: the largest 4:3 area that fits the window, or all of a wide one */
 static int g_win_w, g_win_h;     /* window (swap chain) size; the back buffer is centred in it */
 static WGPUTexture g_depth;
 static WGPUTextureView g_depth_view;
@@ -594,7 +594,7 @@ static void on_mapped(WGPUBufferMapAsyncStatus st, void *u) {
 
 /* Reads the back buffer back and writes it as a PNG (work recorded so far is submitted first). */
 #ifndef __EMSCRIPTEN__
-static void capture_png(const char *path) {
+void capture_png(const char *path) {
     uint32_t w = (uint32_t)g_surf_w, h = (uint32_t)g_surf_h, stride = (w * 4 + 255) & ~255u;
     WGPUBufferDescriptor bd = WGPU_BUFFER_DESCRIPTOR_INIT;
     bd.size = (uint64_t)stride * h;
@@ -1006,6 +1006,9 @@ static GSurf *gsurf(uint32_t id, uint32_t w, uint32_t h, int depth) {
     g = calloc(1, sizeof *g);
     g->w = w ? w : 1; g->h = h ? h : 1; g->depth = depth;
     WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    td.dimension = WGPUTextureDimension_2D;
+    td.mipLevelCount = 1;
+    td.sampleCount = 1;
     td.size = (WGPUExtent3D){ g->w, g->h, 1 };
     td.format = depth ? WGPUTextureFormat_Depth24PlusStencil8 : g_surf_fmt;
     td.usage = WGPUTextureUsage_RenderAttachment |
@@ -1507,7 +1510,7 @@ void gpu_exec(const CmdHdr *h) {
         if (buf) {
             g_map_done = 0;
             wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, (uint64_t)stride * gh, on_mapped, NULL);
-            while (!g_map_done) wgpuInstanceProcessEvents(g_inst);
+            while (!g_map_done) wgpuDevicePoll(g_dev, true, NULL);
             store_pixels(c, wgpuBufferGetConstMappedRange(buf, 0, (uint64_t)stride * gh), gw, gh, stride);
             wgpuBufferUnmap(buf);
             wgpuBufferDestroy(buf);   /* free the staging memory now, not at garbage collection */

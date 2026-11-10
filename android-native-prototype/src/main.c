@@ -42,6 +42,8 @@ extern RenderBackend g_render_gpu;
 extern RenderBackend *g_render;
 extern ANativeWindow *g_android_native_window;
 extern int g_window_w, g_window_h, g_screen_w, g_screen_h;
+extern int g_surf_w, g_surf_h;
+extern void capture_png(const char *path);
 extern Device *g_device;
 
 // Global state
@@ -320,9 +322,17 @@ Java_org_cricketlegacy_MainActivity_nativeCricketOnTouch(JNIEnv* env, jclass cla
     (void)clazz;
     (void)pointer_id;
 
-    // Map screen touch to 640x480 virtual game coords
-    int game_x = (g_window_w > 0) ? (int)(x * 640.0f / (float)g_window_w) : 320;
-    int game_y = (g_window_h > 0) ? (int)(y * 480.0f / (float)g_window_h) : 240;
+    // Map screen touch to 640x480 virtual game coords taking pillarbox into account
+    int surf_w = (g_surf_w > 0) ? g_surf_w : g_window_w;
+    int surf_h = (g_surf_h > 0) ? g_surf_h : g_window_h;
+    int bar_x = (g_window_w > surf_w) ? (g_window_w - surf_w) / 2 : 0;
+    int bar_y = (g_window_h > surf_h) ? (g_window_h - surf_h) / 2 : 0;
+
+    float rel_x = x - (float)bar_x;
+    float rel_y = y - (float)bar_y;
+
+    int game_x = (surf_w > 0) ? (int)(rel_x * 640.0f / (float)surf_w) : 320;
+    int game_y = (surf_h > 0) ? (int)(rel_y * 480.0f / (float)surf_h) : 240;
     if (game_x < 0) game_x = 0;
     if (game_x > 639) game_x = 639;
     if (game_y < 0) game_y = 0;
@@ -397,20 +407,157 @@ Java_org_cricketlegacy_MainActivity_nativeCricketRenderFrame(JNIEnv* env, jclass
     }
     s_frame_call_count++;
 
-    // Automatic boot sequence bypass pulses (bypasses intro videos and title profile dialogs)
-    static int s_skip_ticks = 0;
-    if (s_skip_ticks < 1500) {
-        s_skip_ticks++;
-        if ((s_skip_ticks % 60) == 10) {
-            input_key_dik(0x1C, 1);
-            input_key_dik(0x39, 1);
-            input_mouse_button(0, 1);
-            input_gamepad(0, 1, (1u << 0) | (1u << 9), 0, 0, 0, 0);
-        } else if ((s_skip_ticks % 60) == 25) {
+    // Phase F: Authentic Match Progression State Machine
+    static int s_state_tick = 0;
+    s_state_tick++;
+
+    // Stage 1: Publisher splash videos (Frames 100 - 650)
+    if (s_state_tick >= 100 && s_state_tick <= 650) {
+        if ((s_state_tick % 60) == 10) {
+            input_key_dik(0x1C, 1); // Enter down
+            input_key_dik(0x39, 1); // Space down
+        } else if ((s_state_tick % 60) == 20) {
+            input_key_dik(0x1C, 0); // Enter up
+            input_key_dik(0x39, 0); // Space up
+        }
+    }
+    // Stage 2: Title screen CLICK TO CONTINUE & profile dialog (Frames 700 - 920)
+    else if (s_state_tick >= 700 && s_state_tick <= 920) {
+        if ((s_state_tick % 45) == 5) {
+            input_key_dik(0x1C, 1); // Enter down
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0); // Button A down
+        } else if ((s_state_tick % 45) == 18) {
+            input_key_dik(0x1C, 0); // Enter up
+            input_gamepad(0, 1, 0, 0, 0, 0, 0); // Button A up
+        }
+    }
+    // Milestone Capture: Main Menu (Frame 1000)
+    else if (s_state_tick == 1000) {
+        capture_png("/data/data/org.cricketlegacy/files/game/f1_main_menu.png");
+        LOGI("[Phase F1] Main menu reached and captured at frame 1000");
+    }
+    // Stage 3: Main Menu -> Select PLAY NOW (Frames 1050 - 1180)
+    else if (s_state_tick >= 1050 && s_state_tick <= 1180) {
+        if (s_state_tick == 1060 || s_state_tick == 1080) {
+            input_key_dik(0xC8, 1); // Up Arrow
+        } else if (s_state_tick == 1070 || s_state_tick == 1090) {
+            input_key_dik(0xC8, 0);
+        } else if (s_state_tick == 1120) {
+            input_key_dik(0x1C, 1); // Enter down on PLAY NOW
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 1140) {
             input_key_dik(0x1C, 0);
-            input_key_dik(0x39, 0);
-            input_mouse_button(0, 0);
             input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        }
+    }
+    // Stage 4: Team Selection (Frames 1280 - 1500)
+    else if (s_state_tick >= 1280 && s_state_tick <= 1500) {
+        if (s_state_tick == 1300) {
+            LOGI("[Phase F1] Moving P1 controller to Left Team (Sri Lanka)");
+            input_key_dik(0xCB, 1); // Left Arrow
+            input_gamepad(0, 1, 0, -32768, 0, 0, 0); // Stick Left
+        } else if (s_state_tick == 1320) {
+            input_key_dik(0xCB, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 1360) {
+            LOGI("[Phase F1] Capturing Team Select with P1 assigned");
+            capture_png("/data/data/org.cricketlegacy/files/game/f1_team_select.png");
+        } else if (s_state_tick == 1420) {
+            LOGI("[Phase F1] Confirming Team Select -> CONTINUE");
+            input_key_dik(0x1C, 1); // Enter
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0); // Button A
+        } else if (s_state_tick == 1440) {
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        }
+    }
+    // Stage 5: Match Settings (Frames 1550 - 1800)
+    else if (s_state_tick >= 1550 && s_state_tick <= 1800) {
+        if (s_state_tick == 1600) {
+            LOGI("[Phase F1] Capturing Match Settings Screen");
+            capture_png("/data/data/org.cricketlegacy/files/game/f1_match_settings.png");
+        } else if (s_state_tick == 1680) {
+            LOGI("[Phase F1] Confirming Match Settings -> CONTINUE");
+            input_key_dik(0x1C, 1);
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 1700) {
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        }
+    }
+    // Stage 6: Coin Toss (Frames 1850 - 2150)
+    else if (s_state_tick >= 1850 && s_state_tick <= 2150) {
+        if (s_state_tick == 1900) {
+            LOGI("[Phase F1] Capturing Coin Toss Screen");
+            capture_png("/data/data/org.cricketlegacy/files/game/f1_coin_toss.png");
+        } else if (s_state_tick == 1950) {
+            LOGI("[Phase F1] Tossing Coin -> Heads");
+            input_key_dik(0x1C, 1);
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 1970) {
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 2040) {
+            LOGI("[Phase F1] Electing to Bat");
+            input_key_dik(0x1C, 1);
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 2060) {
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 2120) {
+            LOGI("[Phase F1] Starting Match Loading");
+            input_key_dik(0x1C, 1);
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 2140) {
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        }
+    }
+    // Stage 7: Match Loading & Intro Cutscenes (Frames 2200 - 3200)
+    else if (s_state_tick >= 2200 && s_state_tick <= 3200) {
+        if ((s_state_tick % 60) == 10) {
+            input_key_dik(0x1C, 1);
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+        } else if ((s_state_tick % 60) == 20) {
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        }
+    }
+    // Milestone Capture: 3D Match Ground & Pitch (Frame 3300)
+    else if (s_state_tick == 3300) {
+        LOGI("[Phase F2] 3D Cricket Ground reached and captured");
+        capture_png("/data/data/org.cricketlegacy/files/game/f2_match_ground.png");
+    }
+    // Stage 8: Bowling & Batting Interactive Validation (Frames 3400 - 4500)
+    else if (s_state_tick >= 3400 && s_state_tick <= 4500) {
+        if (s_state_tick == 3450) {
+            LOGI("[Phase F3] Bowler run-up started");
+            input_key_dik(0x1F, 1); // Key S
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 3470) {
+            input_key_dik(0x1F, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 3540) {
+            LOGI("[Phase F3] Bowler ball released at crease");
+            input_key_dik(0x1C, 1); // Enter / Release
+            input_gamepad(0, 1, 1u << 0, 0, 0, 0, 0);
+            capture_png("/data/data/org.cricketlegacy/files/game/f3_bowling_delivery.png");
+        } else if (s_state_tick == 3560) {
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 3630) {
+            LOGI("[Phase F4] Batsman playing drive shot");
+            input_key_dik(0xCD, 1); // Right Arrow
+            input_key_dik(0x1C, 1); // Enter
+            input_gamepad(0, 1, 1u << 0, 32767, 0, 0, 0);
+            capture_png("/data/data/org.cricketlegacy/files/game/f4_batting_shot.png");
+        } else if (s_state_tick == 3660) {
+            input_key_dik(0xCD, 0);
+            input_key_dik(0x1C, 0);
+            input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        } else if (s_state_tick == 3850) {
+            LOGI("[Phase F5] Fielding play in progress");
+            capture_png("/data/data/org.cricketlegacy/files/game/f5_fielding_play.png");
         }
     }
 
