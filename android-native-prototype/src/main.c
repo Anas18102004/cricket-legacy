@@ -21,6 +21,8 @@
 #include "test_stage3_crt_startup.h"
 #include "game_loop.h"
 #include "test_stage4_game_loop.h"
+#include "game_menu_presentation.h"
+#include "test_stage5_menu_presentation.h"
 
 #define LOG_TAG "CricketNativeHarness"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -103,7 +105,15 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessInit(JNIEnv* env, jclass
     }
     LOGI("Phase C.2 Stage 4 Engine Main Operating Loop Suite PASSED successfully!");
 
-    // 8. Initial telemetry
+    // 8. Phase C.2 Stage 5: Host Menu Presentation & Render Gateway Suite
+    LOGI("Executing Phase C.2 Stage 5 Host Menu Presentation Suite...");
+    if (!run_stage5_menu_tests()) {
+        LOGE("Phase C.2 Stage 5 host menu presentation tests FAILED!");
+        return JNI_FALSE;
+    }
+    LOGI("Phase C.2 Stage 5 Host Menu Presentation Suite PASSED successfully!");
+
+    // 9. Initial telemetry
     size_t rss_kb = cricket_get_resident_memory_kb();
     LOGI("Initial Native Resident RAM: %zu KB (%.2f MB)", rss_kb, (float)rss_kb / 1024.0f);
 
@@ -214,6 +224,7 @@ Java_org_cricketlegacy_MainActivity_nativeCricketOnTouch(JNIEnv* env, jclass cla
                                                         jint action, jfloat x, jfloat y, jint pointer_id) {
     uint64_t now_ns = get_time_ns();
     game_loop_post_touch(action, x, y);
+    game_menu_on_touch(action, x, y);
     LOGI("Touch Event: Action=%d, Pos=(%.1f, %.1f), Finger=%d, Time=%llu ns", 
          action, x, y, pointer_id, (unsigned long long)now_ns);
 }
@@ -272,6 +283,7 @@ JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketHarnessShutdown(JNIEnv* env, jclass clazz) {
     LOGI("Shutting down Cricket Native Harness...");
     g_is_running = false;
+    game_menu_shutdown();
     test_d3d8_scene_shutdown();
     d3d8_android_shutdown();
     cricket_wgpu_shutdown();

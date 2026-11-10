@@ -26,6 +26,10 @@ extern uint8_t *g_mem;
 extern size_t g_gpu_tex_bytes;
 extern uint32_t g_gpu_pipelines_made;
 
+// Forward declaration of Stage 5 Host Menu Gateway presentation
+extern void game_menu_render_frame(void);
+extern void game_menu_shutdown(void);
+
 // Upstream methods in d3d8.c and render_wgpu.c
 void w_Direct3DCreate8(CPU *c);
 void d3d_CreateDevice(CPU *c);
@@ -178,7 +182,7 @@ void d3d8_android_resize(uint32_t width, uint32_t height) {
 
 bool d3d8_android_render_frame(void) {
     if (!s_adapter_state.is_initialized) return false;
-    test_d3d8_scene_render_frame();
+    game_menu_render_frame();
     if (s_adapter_state.device) {
         s_adapter_state.frame_count = s_adapter_state.device->frame;
         s_adapter_state.gpu_tex_bytes = g_gpu_tex_bytes;
@@ -190,6 +194,7 @@ bool d3d8_android_render_frame(void) {
 void d3d8_android_shutdown(void) {
     if (!s_adapter_state.is_initialized) return;
     LOGI("Shutting down D3D8 Android Adapter...");
+    game_menu_shutdown();
     s_adapter_state.is_initialized = false;
     s_adapter_state.device = NULL;
     s_adapter_state.guest_device_obj = 0;

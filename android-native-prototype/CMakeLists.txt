@@ -47,6 +47,8 @@ add_library(cricket_native_harness SHARED
     src/test_stage3_crt_startup.c
     src/game_loop.c
     src/test_stage4_game_loop.c
+    src/game_menu_presentation.c
+    src/test_stage5_menu_presentation.c
 )
 
 target_link_directories(cricket_native_harness PRIVATE
