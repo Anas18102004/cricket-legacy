@@ -1,0 +1,29 @@
+﻿==================================================================
+CRICKET LEGACY: Native Mobile Input System Unit & Integration Test
+==================================================================
+
+--- [TEST 1] 8-Sector Directional Classification & Injection ---
+  Sector Test [0]: 'Straight Drive' -> Detected Sector=0 (Expected=0) Angle=90.0 deg
+  Sector Test [1]: 'Cover Drive' -> Detected Sector=1 (Expected=1) Angle=135.0 deg
+  Sector Test [2]: 'Square Cut' -> Detected Sector=2 (Expected=2) Angle=180.0 deg
+  Sector Test [3]: 'Third Man / Late Cut' -> Detected Sector=3 (Expected=3) Angle=225.0 deg
+  Sector Test [4]: 'Fine Leg Glance' -> Detected Sector=4 (Expected=4) Angle=270.0 deg
+  Sector Test [5]: 'Square Leg Flick' -> Detected Sector=5 (Expected=5) Angle=315.0 deg
+  Sector Test [6]: 'Mid-Wicket Pull' -> Detected Sector=6 (Expected=6) Angle=-0.0 deg
+  Sector Test [7]: 'Mid-On Drive' -> Detected Sector=7 (Expected=7) Angle=45.0 deg
+  --> PASS: All 8 directional shot sectors verified!
+
+--- [TEST 2] Joystick Deadzone & Linear Scaling ---
+  Sub-deadzone touch (5px): Axis=(0, 0) -> PASS (Zero output)
+  Active range touch (60px): Axis=(19917, 0) -> PASS (Smooth scaled output)
+  Joystick release: Axis=(0, 0) -> PASS (Centered)
+  --> PASS: Joystick deadzone and scaling verified!
+
+--- [TEST 3] Multi-Touch Pointer Tagging & Concurrency ---
+  Pointer 0 (Joystick) + Pointer 1 (LOFT Button) active concurrently: Stick LX=24200, DIK_LSHIFT=1 -> PASS
+  Pointer 2 (Center Swipe): Stroke Sector=0, Lofted=1 -> PASS
+  --> PASS: Multi-touch isolation and concurrent processing verified!
+
+==================================================================
+ALL MOBILE INPUT UNIT TESTS COMPLETED SUCCESSFULLY!
+==================================================================

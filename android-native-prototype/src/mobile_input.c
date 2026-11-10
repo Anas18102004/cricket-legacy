@@ -41,7 +41,9 @@ extern void input_tap_release(void);
 static pthread_mutex_t s_input_lock = PTHREAD_MUTEX_INITIALIZER;
 static int s_screen_w = 2264;
 static int s_screen_h = 1017;
-static GamePhase s_current_phase = GAME_PHASE_BATTING;
+// The Android host has no verified Cricket 07 gameplay-state callback yet. Start
+// closed so menu touches can never be interpreted as invisible batting controls.
+static GamePhase s_current_phase = GAME_PHASE_MENU;
 static MobileInputConfig s_config;
 
 static TouchPointerState s_pointers[MOBILE_INPUT_MAX_POINTERS];
@@ -77,29 +79,33 @@ static void update_hud_layout(void) {
     float sw = (float)s_screen_w;
     float sh = (float)s_screen_h;
     bool left = s_config.left_handed;
-    float scale = s_config.button_scale;
+    float scale = fminf(sw / 1280.0f, sh / 720.0f);
+    if (scale < 0.7f) scale = 0.7f;
+    if (scale > 1.4f) scale = 1.4f;
+    scale *= s_config.button_scale;
 
     // 1. Virtual Joystick
-    s_joystick.radius = 90.0f * scale;
+    s_joystick.radius = 110.0f * scale;
     s_joystick.deadzone = s_config.joystick_deadzone;
     if (!left) {
         // Right-handed mode: Joystick on bottom-left
-        s_joystick.center_x = 180.0f * scale;
-        s_joystick.center_y = sh - 180.0f * scale;
+        // Match the Android overlay anchor and clear the original delivery meter.
+        s_joystick.center_x = 325.0f * scale;
+        s_joystick.center_y = sh - 305.0f * scale;
     } else {
         // Left-handed mode: Joystick on bottom-right
         s_joystick.center_x = sw - 180.0f * scale;
-        s_joystick.center_y = sh - 180.0f * scale;
+        s_joystick.center_y = sh - 305.0f * scale;
     }
 
     // 2. Virtual Buttons
     s_button_count = 0;
-    float btn_sz = 80.0f * scale;
-    float gap = 20.0f * scale;
+    float btn_sz = 90.0f * scale;
+    float gap = 24.0f * scale;
 
     // Right-side cluster (or left-side if left-handed)
-    float cluster_x = !left ? (sw - 220.0f * scale) : (60.0f * scale);
-    float cluster_y = sh - 220.0f * scale;
+    float cluster_x = !left ? (sw - 240.0f * scale) : (60.0f * scale);
+    float cluster_y = sh - 340.0f * scale;
 
     // Button: Loft Toggle
     s_buttons[s_button_count++] = (VirtualButtonState){
@@ -231,7 +237,8 @@ void mobile_input_init(int screen_w, int screen_h) {
     s_screen_h = screen_h > 0 ? screen_h : 1017;
 
     // Default configuration
-    s_config.batting_mode = BATTING_MODE_HYBRID;
+    s_current_phase = GAME_PHASE_MENU;
+    s_config.batting_mode = BATTING_MODE_PURE_SWIPE;
     s_config.bowling_mode = BOWLING_MODE_GESTURE_AIM;
     s_config.fielding_mode = FIELDING_MODE_ASSISTED;
     s_config.joystick_deadzone = 0.15f;
@@ -260,9 +267,62 @@ void mobile_input_resize(int screen_w, int screen_h) {
     pthread_mutex_unlock(&s_input_lock);
 }
 
+void mobile_input_set_hud_layout(float joystick_x, float joystick_y, float joystick_radius,
+                                  const float *button_rects, int button_count) {
+    if (!button_rects || button_count <= 0) return;
+    pthread_mutex_lock(&s_input_lock);
+    for (int i = 0; i < s_active_stroke_key_count; i++)
+        input_key_dik(s_active_stroke_keys[i], 0);
+    s_active_stroke_key_count = 0;
+    s_stroke_key_hold_frames = 0;
+    for (int i = 0; i < s_button_count; i++) {
+        if (s_buttons[i].is_pressed) input_key_dik(s_buttons[i].dik_binding, 0);
+        s_buttons[i].is_pressed = false;
+    }
+    memset(s_pointers, 0, sizeof(s_pointers));
+    s_joystick.is_active = false;
+    s_joystick.pointer_id = -1;
+    s_joystick.norm_x = s_joystick.norm_y = 0.0f;
+    s_joystick.axis_x = s_joystick.axis_y = 0;
+    input_gamepad(0, 1, 0, 0, 0, 0, 0);
+    s_joystick.center_x = joystick_x;
+    s_joystick.center_y = joystick_y;
+    s_joystick.radius = joystick_radius;
+    int count = button_count < s_button_count ? button_count : s_button_count;
+    for (int i = 0; i < count; i++) {
+        s_buttons[i].x = button_rects[i * 4 + 0];
+        s_buttons[i].y = button_rects[i * 4 + 1];
+        s_buttons[i].w = button_rects[i * 4 + 2];
+        s_buttons[i].h = button_rects[i * 4 + 3];
+    }
+    pthread_mutex_unlock(&s_input_lock);
+}
+
 void mobile_input_set_game_phase(GamePhase phase) {
     pthread_mutex_lock(&s_input_lock);
+    if (phase < GAME_PHASE_MENU || phase > GAME_PHASE_REPLAY) {
+        phase = GAME_PHASE_MENU;
+    }
     s_current_phase = phase;
+    // Explicit context changes release all transient input and pointer owners.
+    // This is user-driven state, not an inferred Cricket 07 phase.
+    for (int i = 0; i < s_active_stroke_key_count; i++) {
+        input_key_dik(s_active_stroke_keys[i], 0);
+    }
+    s_active_stroke_key_count = 0;
+    s_stroke_key_hold_frames = 0;
+    for (int b = 0; b < s_button_count; b++) {
+        VirtualButtonState *btn = &s_buttons[b];
+        if (btn->is_pressed || btn->toggle_state) input_key_dik(btn->dik_binding, 0);
+        btn->is_pressed = false;
+        btn->toggle_state = false;
+    }
+    memset(s_pointers, 0, sizeof(s_pointers));
+    s_joystick.is_active = false;
+    s_joystick.norm_x = s_joystick.norm_y = 0.0f;
+    s_joystick.axis_x = s_joystick.axis_y = 0;
+    s_joystick.pointer_id = -1;
+    input_gamepad(0, 1, 0, 0, 0, 0, 0);
     pthread_mutex_unlock(&s_input_lock);
 }
 
@@ -270,6 +330,8 @@ void mobile_input_configure(const MobileInputConfig *config) {
     if (!config) return;
     pthread_mutex_lock(&s_input_lock);
     s_config = *config;
+    s_config.batting_mode = config->batting_mode == BATTING_MODE_CLASSIC_JOYSTICK
+        ? BATTING_MODE_CLASSIC_JOYSTICK : BATTING_MODE_PURE_SWIPE;
     update_hud_layout();
     pthread_mutex_unlock(&s_input_lock);
 }
@@ -339,6 +401,16 @@ static void update_joystick_axis(float x, float y) {
         s_joystick.axis_y = (int32_t)(s_joystick.norm_y * 32767.0f);
     }
     input_gamepad(0, 1, 0, s_joystick.axis_x, s_joystick.axis_y, 0, 0);
+}
+
+static bool button_allowed_in_context(GamePhase phase, VirtualButtonId id) {
+    if (phase == GAME_PHASE_BATTING || phase == GAME_PHASE_BALL_DEAD)
+        return id == BTN_LOFT_TOGGLE || id == BTN_ADVANCE || id == BTN_DEFEND;
+    if (phase == GAME_PHASE_BOWLING)
+        return id >= BTN_BOWL_STANDARD && id <= BTN_BOWL_BOUNCER;
+    if (phase == GAME_PHASE_RUNNING)
+        return id == BTN_RUN || id == BTN_CANCEL_RUN;
+    return false;
 }
 
 // Maps ShotSector to original DirectInput scan codes
@@ -421,6 +493,36 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
     uint64_t t0 = get_time_us();
     pthread_mutex_lock(&s_input_lock);
 
+    // The Android caller routes only visible HUD touches here. Context is an
+    // explicit user choice; it does not claim to reflect engine state.
+    if (s_current_phase == GAME_PHASE_MENU || s_current_phase == GAME_PHASE_FIELDING ||
+        s_current_phase == GAME_PHASE_REPLAY) {
+        pthread_mutex_unlock(&s_input_lock);
+        return;
+    }
+
+    int masked_action = action & 0xFF; // MotionEvent.ACTION_MASK
+    if (masked_action == 3 /* ACTION_CANCEL */) {
+        for (int b = 0; b < s_button_count; b++) {
+            VirtualButtonState *btn = &s_buttons[b];
+            if (btn->is_pressed || btn->toggle_state) input_key_dik(btn->dik_binding, 0);
+            btn->is_pressed = false;
+            btn->toggle_state = false;
+        }
+        for (int i = 0; i < s_active_stroke_key_count; i++)
+            input_key_dik(s_active_stroke_keys[i], 0);
+        s_active_stroke_key_count = 0;
+        s_stroke_key_hold_frames = 0;
+        memset(s_pointers, 0, sizeof(s_pointers));
+        s_joystick.is_active = false;
+        s_joystick.norm_x = s_joystick.norm_y = 0.0f;
+        s_joystick.axis_x = s_joystick.axis_y = 0;
+        s_joystick.pointer_id = -1;
+        input_gamepad(0, 1, 0, 0, 0, 0, 0);
+        pthread_mutex_unlock(&s_input_lock);
+        return;
+    }
+
     // Map pointer slot
     TouchPointerState *ptr = NULL;
     for (int i = 0; i < MOBILE_INPUT_MAX_POINTERS; i++) {
@@ -429,8 +531,6 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
             break;
         }
     }
-
-    int masked_action = action & 0xFF; // MotionEvent.ACTION_MASK
 
     if (masked_action == 0 /* ACTION_DOWN */ || masked_action == 5 /* ACTION_POINTER_DOWN */) {
         // Allocate slot for new pointer
@@ -453,10 +553,12 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
             // 1. Check Button Bounds
             for (int b = 0; b < s_button_count; b++) {
                 VirtualButtonState *btn = &s_buttons[b];
+                if (!button_allowed_in_context(s_current_phase, btn->id)) continue;
                 float slop = 12.0f; // touch slop margin
                 if (x >= btn->x - slop && x <= btn->x + btn->w + slop &&
                     y >= btn->y - slop && y <= btn->y + btn->h + slop) {
                     ptr->owner = OWNER_BUTTON;
+                    ptr->button_id = (int)btn->id;
                     btn->is_pressed = true;
                     if (btn->is_toggle) {
                         btn->toggle_state = !btn->toggle_state;
@@ -475,7 +577,10 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
                 float jdx = x - s_joystick.center_x;
                 float jdy = y - s_joystick.center_y;
                 float jdist = sqrtf(jdx * jdx + jdy * jdy);
-                if (jdist <= s_joystick.radius * 1.5f) {
+                bool joystick_context = (s_current_phase == GAME_PHASE_BATTING ||
+                    s_current_phase == GAME_PHASE_BALL_DEAD) &&
+                    s_config.batting_mode == BATTING_MODE_CLASSIC_JOYSTICK;
+                if (joystick_context && jdist <= s_joystick.radius * 1.5f) {
                     ptr->owner = OWNER_JOYSTICK;
                     s_joystick.is_active = true;
                     s_joystick.pointer_id = pointer_id;
@@ -485,6 +590,8 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
                     ptr->owner = OWNER_SWIPE_AREA;
                 }
             }
+            LOGI("[HUD owner] DOWN pointer=%d owner=%d phase=%d button=%d",
+                 pointer_id, ptr->owner, s_current_phase, ptr->button_id);
         }
     } else if (masked_action == 2 /* ACTION_MOVE */) {
         if (ptr && ptr->active) {
@@ -498,6 +605,8 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
         }
     } else if (masked_action == 1 /* ACTION_UP */ || masked_action == 6 /* ACTION_POINTER_UP */ || masked_action == 3 /* ACTION_CANCEL */) {
         if (ptr && ptr->active) {
+            LOGI("[HUD owner] UP pointer=%d owner=%d button=%d",
+                 pointer_id, ptr->owner, ptr->button_id);
             uint64_t now_ms = get_time_ms();
             uint32_t duration_ms = (uint32_t)(now_ms - ptr->start_time_ms);
             float dx = x - ptr->start_x;
@@ -505,7 +614,9 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
             float dist = sqrtf(dx * dx + dy * dy);
             float vel = (duration_ms > 0) ? (dist / (float)duration_ms) : 0.0f;
 
-            if (ptr->owner == OWNER_SWIPE_AREA) {
+            if (ptr->owner == OWNER_SWIPE_AREA &&
+                (s_current_phase == GAME_PHASE_BATTING || s_current_phase == GAME_PHASE_BALL_DEAD) &&
+                s_config.batting_mode == BATTING_MODE_PURE_SWIPE) {
                 // Evaluate Swipe Stroke
                 if (dist >= 25.0f * s_config.swipe_sensitivity && duration_ms < 600) {
                     SwipeStrokeEvent stroke;
@@ -550,12 +661,13 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
                 s_joystick.axis_x = s_joystick.axis_y = 0;
                 input_gamepad(0, 1, 0, 0, 0, 0, 0);
             } else if (ptr->owner == OWNER_BUTTON) {
-                // Release non-toggle buttons
                 for (int b = 0; b < s_button_count; b++) {
                     VirtualButtonState *btn = &s_buttons[b];
-                    if (btn->is_pressed && !btn->is_toggle) {
+                    if ((int)btn->id == ptr->button_id && !btn->is_toggle) {
                         btn->is_pressed = false;
                         input_key_dik(btn->dik_binding, 0);
+                        input_gamepad(0, 1, 0, s_joystick.axis_x, s_joystick.axis_y, 0, 0);
+                        break;
                     }
                 }
             }

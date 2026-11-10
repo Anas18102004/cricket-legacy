@@ -37,7 +37,9 @@ typedef enum {
     GAME_PHASE_BATTING = 1,
     GAME_PHASE_BOWLING = 2,
     GAME_PHASE_FIELDING = 3,
-    GAME_PHASE_RUNNING = 4
+    GAME_PHASE_RUNNING = 4,
+    GAME_PHASE_BALL_DEAD = 5,
+    GAME_PHASE_REPLAY = 6
 } GamePhase;
 
 // Touch Pointer Ownership Tag
@@ -87,6 +89,7 @@ typedef struct {
     float current_x, current_y;
     uint64_t start_time_ms;
     uint64_t last_time_ms;
+    int button_id;
 } TouchPointerState;
 
 // Virtual Joystick State
@@ -156,6 +159,10 @@ typedef struct {
 // Core Lifecycle APIs
 void mobile_input_init(int screen_w, int screen_h);
 void mobile_input_resize(int screen_w, int screen_h);
+// Use Android-computed, viewport-relative HUD geometry for both drawing and
+// native hit testing. button_rects contains x,y,w,h for button IDs 1..9.
+void mobile_input_set_hud_layout(float joystick_x, float joystick_y, float joystick_radius,
+                                  const float *button_rects, int button_count);
 void mobile_input_set_game_phase(GamePhase phase);
 void mobile_input_configure(const MobileInputConfig *config);
 void mobile_input_get_config(MobileInputConfig *out_config);

@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include "mobile_input.h"
 
@@ -31,11 +34,43 @@ void input_tap(int x, int y) { (void)x; (void)y; }
 void input_tap_move(int dx, int dy) { (void)dx; (void)dy; }
 void input_tap_release(void) {}
 
+// Gameplay input is deliberately disabled until the host reports an explicit
+// batting context. Test batting mechanics only after opting into that context.
+static void prepare_batting_input(BattingControlMode mode) {
+    mobile_input_init(1920, 1080);
+    MobileInputConfig config;
+    mobile_input_get_config(&config);
+    config.batting_mode = mode;
+    mobile_input_configure(&config);
+    mobile_input_set_game_phase(GAME_PHASE_BATTING);
+    mobile_input_test_reset();
+    memset(s_mock_dik_state, 0, sizeof(s_mock_dik_state));
+    s_mock_pad_lx = s_mock_pad_ly = 0;
+    s_mock_pad_btn = 0;
+    s_mock_pad_updates = 0;
+}
+
+static void test_menu_context_is_fail_closed(void) {
+    printf("--- [TEST 0] Menu Context Fails Closed ---\n");
+    mobile_input_init(1920, 1080);
+    mobile_input_test_reset();
+
+    mobile_input_on_touch(0 /* DOWN */, 960.0f, 540.0f, 0);
+    mobile_input_on_touch(2 /* MOVE */, 960.0f, 440.0f, 0);
+    mobile_input_on_touch(1 /* UP */, 960.0f, 440.0f, 0);
+
+    MobileInputTelemetry telem;
+    mobile_input_get_telemetry(&telem);
+    assert(!telem.last_stroke.valid);
+    assert(s_mock_dik_state[0x1C] == 0);
+    assert(s_mock_pad_btn == 0);
+    printf("  Menu swipe produced no gameplay action -> PASS\n\n");
+}
+
 // Test 1: 8-Sector Direction Classifier & DirectInput mapping
 static void test_sector_classification(void) {
     printf("--- [TEST 1] 8-Sector Directional Classification & Injection ---\n");
-    mobile_input_init(1920, 1080);
-    mobile_input_test_reset();
+    prepare_batting_input(BATTING_MODE_PURE_SWIPE);
 
     struct SectorTestCase {
         float dx, dy;
@@ -88,13 +123,11 @@ static void test_sector_classification(void) {
 // Test 2: Deadzone & Sensitivity processing for Virtual Joystick
 static void test_joystick_deadzone(void) {
     printf("--- [TEST 2] Joystick Deadzone & Linear Scaling ---\n");
-    mobile_input_init(1920, 1080);
-    mobile_input_test_reset();
+    prepare_batting_input(BATTING_MODE_CLASSIC_JOYSTICK);
 
-    // Default deadzone is 0.15 (15%), radius is ~90px
-    // Touch inside deadzone: dx = 5px, dy = 5px from center (180, 900)
-    float joy_cx = 180.0f;
-    float joy_cy = 1080.0f - 180.0f;
+    // 1920x1080 layout scale clamps to 1.4; joystick anchor is 325px * scale.
+    float joy_cx = 325.0f * 1.4f;
+    float joy_cy = 1080.0f - 305.0f * 1.4f;
 
     mobile_input_on_touch(0 /* DOWN */, joy_cx + 5.0f, joy_cy + 5.0f, 0);
     mobile_input_on_touch(2 /* MOVE */, joy_cx + 5.0f, joy_cy + 5.0f, 0);
@@ -105,7 +138,7 @@ static void test_joystick_deadzone(void) {
 
     // Touch outside deadzone: 60px right
     mobile_input_on_touch(2 /* MOVE */, joy_cx + 60.0f, joy_cy, 0);
-    assert(s_mock_pad_lx > 10000);
+    assert(s_mock_pad_lx > 5000);
     printf("  Active range touch (60px): Axis=(%d, %d) -> PASS (Smooth scaled output)\n", s_mock_pad_lx, s_mock_pad_ly);
 
     // Release joystick
@@ -119,36 +152,35 @@ static void test_joystick_deadzone(void) {
 // Test 3: Multi-Touch Pointer Independence (Simultaneous Joystick + Button + Swipe)
 static void test_multitouch_concurrency(void) {
     printf("--- [TEST 3] Multi-Touch Pointer Tagging & Concurrency ---\n");
-    mobile_input_init(1920, 1080);
-    mobile_input_test_reset();
+    prepare_batting_input(BATTING_MODE_CLASSIC_JOYSTICK);
 
-    float joy_cx = 180.0f;
-    float joy_cy = 1080.0f - 180.0f;
+    float scale = 1.4f;
+    float joy_cx = 325.0f * scale;
+    float joy_cy = 1080.0f - 305.0f * scale;
 
     // Pointer 0: Joystick touch (held down)
     mobile_input_on_touch(0 /* DOWN */, joy_cx + 70.0f, joy_cy, 0);
     assert(s_mock_pad_lx > 0);
 
-    // Pointer 1: Tap LOFT button on right side (sw - 220, sh - 320)
-    float loft_x = 1920.0f - 220.0f + 20.0f;
-    float loft_y = 1080.0f - 220.0f - 80.0f + 20.0f;
+    // Pointer 1: Tap LOFT button at the responsive right-side layout location.
+    float cluster_x = 1920.0f - 240.0f * scale;
+    float cluster_y = 1080.0f - 340.0f * scale;
+    float loft_x = cluster_x + 20.0f;
+    float loft_y = cluster_y - 90.0f * scale - 24.0f * scale + 20.0f;
     mobile_input_on_touch(5 /* POINTER_DOWN */, loft_x, loft_y, 1);
     assert(s_mock_dik_state[0x2A] == 1); // DIK_LSHIFT active (Loft enabled)
     printf("  Pointer 0 (Joystick) + Pointer 1 (LOFT Button) active concurrently: Stick LX=%d, DIK_LSHIFT=%d -> PASS\n",
            s_mock_pad_lx, s_mock_dik_state[0x2A]);
 
-    // Pointer 2: Batting swipe in center of screen
+    // Classic mode must not turn an unrelated screen swipe into a shot.
     mobile_input_on_touch(5 /* POINTER_DOWN */, 960.0f, 540.0f, 2);
     mobile_input_on_touch(2 /* MOVE */, 960.0f, 440.0f, 2);
     mobile_input_on_touch(6 /* POINTER_UP */, 960.0f, 440.0f, 2);
-
     MobileInputTelemetry telem;
     mobile_input_get_telemetry(&telem);
-    assert(telem.last_stroke.valid);
-    assert(telem.last_stroke.sector == SECTOR_STRAIGHT_DRIVE);
-    assert(telem.last_stroke.is_lofted); // Must inherit active loft state!
-    printf("  Pointer 2 (Center Swipe): Stroke Sector=%d, Lofted=%d -> PASS\n",
-           telem.last_stroke.sector, telem.last_stroke.is_lofted);
+    assert(!telem.last_stroke.valid);
+    assert(s_mock_dik_state[0x1C] == 0);
+    printf("  Classic joystick mode ignores unrelated swipe -> PASS\n");
 
     // Release Pointer 0
     mobile_input_on_touch(1 /* UP */, joy_cx + 70.0f, joy_cy, 0);
@@ -156,14 +188,103 @@ static void test_multitouch_concurrency(void) {
     printf("  --> PASS: Multi-touch isolation and concurrent processing verified!\n\n");
 }
 
+static void test_user_context_button_routing(void) {
+    printf("--- [TEST 4] User Context Routes Only Its Controls ---\n");
+    mobile_input_init(1920, 1080);
+    MobileInputConfig config;
+    mobile_input_get_config(&config);
+    mobile_input_configure(&config);
+    memset(s_mock_dik_state, 0, sizeof(s_mock_dik_state));
+
+    float scale = 1.4f;
+    float cluster_x = 1920.0f - 240.0f * scale;
+    float cluster_y = 1080.0f - 340.0f * scale;
+    float btn = 90.0f * scale;
+    float gap = 24.0f * scale;
+
+    mobile_input_set_game_phase(GAME_PHASE_RUNNING);
+    mobile_input_on_touch(0, cluster_x + btn * 0.5f, cluster_y + btn * 0.5f, 0);
+    assert(s_mock_dik_state[0x20] == 1); // Candidate RUN binding reaches host DIK injection.
+    mobile_input_on_touch(1, cluster_x + btn * 0.5f, cluster_y + btn * 0.5f, 0);
+    assert(s_mock_dik_state[0x20] == 0);
+    assert(s_mock_dik_state[0x1F] == 0);
+
+    mobile_input_set_game_phase(GAME_PHASE_BOWLING);
+    float standard_x = cluster_x - btn - gap + btn * 0.5f;
+    float standard_y = cluster_y - btn - gap + btn * 0.5f;
+    mobile_input_on_touch(0, standard_x, standard_y, 0);
+    assert(s_mock_dik_state[0x1F] == 1); // Candidate standard-bowl binding.
+    mobile_input_on_touch(1, standard_x, standard_y, 0);
+    assert(s_mock_dik_state[0x1F] == 0);
+
+    mobile_input_set_game_phase(GAME_PHASE_MENU);
+    mobile_input_on_touch(0, standard_x, standard_y, 0);
+    assert(s_mock_dik_state[0x1F] == 0);
+    printf("  RUN/bowling controls route to host input; menu context stays closed -> PASS\n\n");
+}
+
+static void test_cancel_and_context_change_release_inputs(void) {
+    printf("--- [TEST 5] Cancel and Context Change Release Inputs ---\n");
+    prepare_batting_input(BATTING_MODE_CLASSIC_JOYSTICK);
+    float scale = 1.4f;
+    float joy_x = 325.0f * scale;
+    float joy_y = 1080.0f - 305.0f * scale;
+    mobile_input_on_touch(0, joy_x + 70.0f, joy_y, 0);
+    assert(s_mock_pad_lx > 0);
+    mobile_input_on_touch(3 /* ACTION_CANCEL */, joy_x + 70.0f, joy_y, 0);
+    assert(s_mock_pad_lx == 0 && s_mock_pad_ly == 0);
+
+    mobile_input_set_game_phase(GAME_PHASE_RUNNING);
+    float cluster_x = 1920.0f - 240.0f * scale;
+    float cluster_y = 1080.0f - 340.0f * scale;
+    float btn = 90.0f * scale;
+    mobile_input_on_touch(0, cluster_x + btn * 0.5f, cluster_y + btn * 0.5f, 1);
+    assert(s_mock_dik_state[0x20] == 1);
+    mobile_input_set_game_phase(GAME_PHASE_MENU);
+    assert(s_mock_dik_state[0x20] == 0);
+    assert(s_mock_pad_lx == 0 && s_mock_pad_ly == 0);
+    printf("  ACTION_CANCEL and context change release joystick/key states -> PASS\n\n");
+}
+
+static void test_android_viewport_layout_is_used_for_hit_testing(void) {
+    printf("--- [TEST 6] Android Viewport Layout Drives Native Hit Tests ---\n");
+    prepare_batting_input(BATTING_MODE_CLASSIC_JOYSTICK);
+
+    float rects[9 * 4];
+    for (int i = 0; i < 9; i++) {
+        rects[i * 4 + 0] = 700.0f + (float)(i % 3) * 100.0f;
+        rects[i * 4 + 1] = 600.0f + (float)(i / 3) * 100.0f;
+        rects[i * 4 + 2] = 80.0f;
+        rects[i * 4 + 3] = 80.0f;
+    }
+    mobile_input_set_hud_layout(350.0f, 780.0f, 60.0f, rects, 9);
+
+    mobile_input_on_touch(0, 400.0f, 780.0f, 0);
+    assert(s_mock_pad_lx > 10000);
+    mobile_input_on_touch(1, 400.0f, 780.0f, 0);
+    assert(s_mock_pad_lx == 0 && s_mock_pad_ly == 0);
+
+    // The injected RUN rectangle is at x=700,y=700, independent of defaults.
+    mobile_input_set_game_phase(GAME_PHASE_RUNNING);
+    mobile_input_on_touch(0, 740.0f, 740.0f, 1);
+    assert(s_mock_dik_state[0x20] == 1);
+    mobile_input_on_touch(1, 740.0f, 740.0f, 1);
+    assert(s_mock_dik_state[0x20] == 0);
+    printf("  Injected viewport joystick and RUN bounds drive native input -> PASS\n\n");
+}
+
 int main(void) {
     printf("==================================================================\n");
     printf("CRICKET LEGACY: Native Mobile Input System Unit & Integration Test\n");
     printf("==================================================================\n\n");
 
+    test_menu_context_is_fail_closed();
     test_sector_classification();
     test_joystick_deadzone();
     test_multitouch_concurrency();
+    test_user_context_button_routing();
+    test_cancel_and_context_change_release_inputs();
+    test_android_viewport_layout_is_used_for_hit_testing();
 
     printf("==================================================================\n");
     printf("ALL MOBILE INPUT UNIT TESTS COMPLETED SUCCESSFULLY!\n");

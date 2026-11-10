@@ -25,4 +25,10 @@ typedef struct RenderBackend {
 extern RenderBackend *g_render;
 extern RenderBackend g_render_headless, g_render_gpu;   /* g_render_gpu: render_rec.c */
 
+/* Read-only coarse renderer context. Returns 0 until a frame is presented,
+   then 1 and writes is_menu: nonzero for front-end/large-panel frames, zero
+   for open-play rendering. This does not classify cricket sub-states. */
+int rc_get_menu_context(int *is_menu);
+void rc_reset_menu_context(void);
+
 #endif

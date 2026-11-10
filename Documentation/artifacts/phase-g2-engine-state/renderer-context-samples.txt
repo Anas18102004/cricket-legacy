@@ -1,0 +1,11 @@
+# Runtime context samples (Phase G.2)
+
+Device: Android emulator `emulator-5554` (x86_64). Probe: temporary, read-only sampler in the Android render callback; sampled every 60 callbacks. Values: `1` = renderer menu-like/large-panel; `0` = open 3D context; `known=1` after first renderer present.
+
+Observed from captured log:
+
+- Startup/front-end, e.g. engine frames 1054, 1112, 1140, 1282, 1332, 1458, 1482, 1535, 1620, 1695: `known=1, render_menu=1`.
+- Prior captured Phase F2 ground/open-play samples around engine frames 2299–2413: `render_menu=0`.
+- Prior captured Phase F3 scripted bowling run-up samples around frames 2431 and 2458: `render_menu=1`; scripted release milestone around frame 2480: `render_menu=0`.
+
+The Phase F progression is scripted, not manual gameplay. These data demonstrate only that renderer classification varies during harness progression; they do not prove menu identity or bowling state. No exact batting/running/dead-ball state was logged. Temporary diagnostic logging was removed from source after collection.

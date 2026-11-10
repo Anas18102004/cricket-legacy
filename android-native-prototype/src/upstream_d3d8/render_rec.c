@@ -685,17 +685,29 @@ static int rec_init(Device *d) {
 /* Menus, for the page's on-screen controls (web/loader.js shows a d-pad in menus and a stick in play): a frame
    with no 3D scene behind it (the front end), or with a large 2D panel drawn centred over the scene (the pause
    menu, the coin toss). The score bar is wide but thin, so play doesn't count. */
-static volatile int g_menu_frame = 1;
+static int g_menu_frame = 1;
+static int g_menu_context_valid = 0;
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-int rc_in_menu(void) { return g_menu_frame; }
+int rc_in_menu(void) { return __atomic_load_n(&g_menu_frame, __ATOMIC_ACQUIRE); }
+
+int rc_get_menu_context(int *is_menu) {
+    if (!is_menu || !__atomic_load_n(&g_menu_context_valid, __ATOMIC_ACQUIRE)) return 0;
+    *is_menu = __atomic_load_n(&g_menu_frame, __ATOMIC_ACQUIRE);
+    return 1;
+}
+
+void rc_reset_menu_context(void) {
+    __atomic_store_n(&g_menu_context_valid, 0, __ATOMIC_RELEASE);
+}
 
 static void rec_present_impl(Device *d) {
     int menu = !g_scene_3d;
     for (int i = 0; i < g_npanels && !menu; i++)
         menu = g_panels[i].x2 - g_panels[i].x1 > (float)g_tgt_lw * 0.4f && g_panels[i].y2 - g_panels[i].y1 > (float)g_tgt_lh * 0.3f;
-    g_menu_frame = menu;
+    __atomic_store_n(&g_menu_frame, menu, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_menu_context_valid, 1, __ATOMIC_RELEASE);
     CmdPresent *c = cmd_alloc(CMD_PRESENT, sizeof *c);
     c->frame = d->frame;
     c->screenshot = (uint32_t)want_screenshot(d->frame);

@@ -1463,9 +1463,15 @@ static void exec_present(const CmdPresent *c) {
         WGPUTexelCopyTextureInfo src = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT, dst = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
         src.texture = g_bb;
         dst.texture = cur.texture;
-        dst.origin = (WGPUOrigin3D){ (uint32_t)(g_win_w - g_surf_w) / 2, (uint32_t)(g_win_h - g_surf_h) / 2, 0 };
-        WGPUExtent3D ex = { (uint32_t)g_surf_w, (uint32_t)g_surf_h, 1 };
-        wgpuCommandEncoderCopyTextureToTexture(enc, &src, &dst, &ex);
+        uint32_t origin_x = (g_win_w > g_surf_w) ? (uint32_t)((g_win_w - g_surf_w) / 2) : 0;
+        uint32_t origin_y = (g_win_h > g_surf_h) ? (uint32_t)((g_win_h - g_surf_h) / 2) : 0;
+        uint32_t copy_w = (uint32_t)g_surf_w;
+        uint32_t copy_h = (uint32_t)g_surf_h;
+        if (origin_x + copy_w > (uint32_t)g_win_w) copy_w = ((uint32_t)g_win_w > origin_x) ? ((uint32_t)g_win_w - origin_x) : 0;
+        if (origin_y + copy_h > (uint32_t)g_win_h) copy_h = ((uint32_t)g_win_h > origin_y) ? ((uint32_t)g_win_h - origin_y) : 0;
+        dst.origin = (WGPUOrigin3D){ origin_x, origin_y, 0 };
+        WGPUExtent3D ex = { copy_w, copy_h, 1 };
+        if (copy_w > 0 && copy_h > 0) wgpuCommandEncoderCopyTextureToTexture(enc, &src, &dst, &ex);
         WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
         wgpuQueueSubmit(g_queue, 1, &cb);
         wgpuCommandBufferRelease(cb);

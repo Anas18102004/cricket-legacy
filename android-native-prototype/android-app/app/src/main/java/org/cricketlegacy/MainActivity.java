@@ -1,6 +1,7 @@
 package org.cricketlegacy;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -11,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.content.SharedPreferences;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -44,6 +46,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     public static native void nativeCricketResize(int width, int height);
     public static native void nativeCricketSurfaceDestroyed();
     public static native void nativeCricketOnTouch(int action, float x, float y, int pointerId);
+    public static native void nativeCricketOnHudTouch(int action, float x, float y, int pointerId);
     public static native void nativeCricketRenderFrame();
     public static native boolean nativeCricketAudioTest();
     public static native void nativeCricketHarnessShutdown();
@@ -55,18 +58,46 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     public static native boolean nativeCricketPollHaptic();
     public static native long nativeCricketGetInputLatencyUs();
     public static native void nativeCricketSetGamePhase(int phase);
+    public static native int nativeCricketGetRenderContext();
+    public static native int[] nativeCricketGetRenderViewport();
+    public static native void nativeCricketSetHudLayout(float[] layout);
+    public static native void nativeCricketInvalidateRenderContext();
 
     private SurfaceView mSurfaceView;
     private MobileHudOverlayView mHudOverlay;
     private Vibrator mVibrator;
     private Handler mHandler;
     private boolean mIsRunning = false;
+    private static final int HUD_OFF = 0;
+    private static final int HUD_BATTING_SWIPE = 1;
+    private static final int HUD_BATTING_CLASSIC = 2;
+    private static final int HUD_BOWLING = 3;
+    private static final int HUD_RUNNING = 4;
+    private static final int HUD_BALL_DEAD = 5;
+    private static final int HUD_FIELDING = 6;
+    private static final int HUD_REPLAY = 7;
+    private int mSelectedHudContext = HUD_OFF;
+    private int mBattingMode = 0;
+    private boolean mHudVisible = false;
+    private int mAppliedRenderContext = Integer.MIN_VALUE;
+    private int mAppliedHudContext = Integer.MIN_VALUE;
+    private final String[] mHudContextChoices = {
+        "Hide controls",
+        "Batting - Swipe",
+        "Batting - Classic Joystick",
+        "Bowling controls",
+        "Running - RUN / CANCEL",
+        "Ball dead - batting controls only",
+        "Fielding - automatic, no controls",
+        "Replay - hide controls"
+    };
 
     private final Runnable mRenderLoop = new Runnable() {
         @Override
         public void run() {
             if (mIsRunning) {
                 nativeCricketRenderFrame();
+                refreshHudVisibility();
 
                 // Poll native haptic pulse
                 if (nativeCricketPollHaptic() && mVibrator != null && mVibrator.hasVibrator()) {
@@ -74,6 +105,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
                 }
 
                 mHandler.postDelayed(this, 16); // ~60 FPS update pacing
+            }
+        }
+    };
+
+    private final android.content.BroadcastReceiver mContextReceiver = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, android.content.Intent intent) {
+            int ctx = intent.getIntExtra("context", -1);
+            if (ctx >= 0) {
+                Log.i(TAG, "Broadcast received: setting HUD context to " + ctx);
+                selectHudContext(ctx);
             }
         }
     };
@@ -89,6 +131,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
         Log.i(TAG, "Cricket Legacy Activity onCreate starting...");
         mHandler = new Handler(Looper.getMainLooper());
         mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        SharedPreferences controlPrefs = getSharedPreferences("mobile_controls", MODE_PRIVATE);
+        mBattingMode = controlPrefs.getInt("batting_mode", 0) == 1 ? 1 : 0;
 
         // Initialize native harness
         boolean initOk = nativeCricketHarnessInit();
@@ -99,21 +143,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
 
         mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
+        // With the gameplay HUD fail-closed, the surface must continue receiving
+        // touch input so the original Cricket 07 menus remain navigable.
+        mSurfaceView.setOnTouchListener(this);
         rootLayout.addView(mSurfaceView, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         mHudOverlay = new MobileHudOverlayView(this);
         mHudOverlay.setListener(this);
+        // The host currently exposes no verified menu/match/ball phase signal.
+        // Never guess from frame counts: hide gameplay controls until one exists.
+        mHudOverlay.setGameplayControlsEnabled(false);
+        mHudOverlay.setBattingMode(mBattingMode);
         rootLayout.addView(mHudOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         setContentView(rootLayout);
 
-        // Apply default input configuration
-        nativeCricketConfigureInput(3 /* HYBRID */, 0 /* GESTURE_AIM */, 0.15f, 1.0f, false, true);
+        // Active gameplay context always starts hidden, even when a batting mode
+        // was persisted. The user explicitly selects a context for each session.
+        nativeCricketConfigureInput(mBattingMode, 0 /* gesture aim */, 0.15f, 1.0f, false, true);
+        nativeCricketSetGamePhase(0 /* hidden */);
 
         // Test basic audio output via AudioTrack synthetic sine wave
         testAudioPlayback();
+
+        // Register dynamic HUD context receiver for external testing/diagnostics
+        registerReceiver(mContextReceiver, new android.content.IntentFilter("org.cricketlegacy.SET_CONTEXT"), Context.RECEIVER_EXPORTED);
     }
 
     private void triggerHapticFeedback() {
@@ -130,14 +186,88 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
 
     @Override
     public void onControlModeChanged(int newMode) {
-        Log.i(TAG, "User toggled control mode to: " + newMode);
-        nativeCricketConfigureInput(newMode, 0, 0.15f, 1.0f, false, true);
-        triggerHapticFeedback();
+        setBattingMode(newMode);
     }
 
     @Override
     public void onTouchForward(int action, float x, float y, int pointerId) {
-        nativeCricketOnTouch(action, x, y, pointerId);
+        nativeCricketOnHudTouch(action, x, y, pointerId);
+    }
+
+    @Override
+    public void onHudLayoutChanged(float[] layout) {
+        nativeCricketSetHudLayout(layout);
+    }
+
+    private void setBattingMode(int mode) {
+        mBattingMode = mode == 1 ? 1 : 0;
+        getSharedPreferences("mobile_controls", MODE_PRIVATE).edit()
+            .putInt("batting_mode", mBattingMode).apply();
+        if (mHudOverlay != null) mHudOverlay.setBattingMode(mBattingMode);
+        nativeCricketConfigureInput(mBattingMode, 0, 0.15f, 1.0f, false, true);
+        if (mHudOverlay != null) mHudOverlay.dispatchNativeLayout();
+    }
+
+    private int nativePhaseForHudContext(int context) {
+        switch (context) {
+            case HUD_BATTING_SWIPE:
+            case HUD_BATTING_CLASSIC: return 1; // user-selected batting context
+            case HUD_BOWLING: return 2;
+            case HUD_FIELDING: return 3;
+            case HUD_RUNNING: return 4;
+            case HUD_BALL_DEAD: return 5;
+            case HUD_REPLAY: return 6;
+            default: return 0;
+        }
+    }
+
+    private void selectHudContext(int context) {
+        mSelectedHudContext = context;
+        mAppliedHudContext = Integer.MIN_VALUE;
+        if (context == HUD_BATTING_SWIPE) setBattingMode(0);
+        else if (context == HUD_BATTING_CLASSIC) setBattingMode(1);
+        if (mHudOverlay != null) mHudOverlay.setGameplayContext(context);
+        refreshHudVisibility();
+    }
+
+    private void refreshHudVisibility() {
+        if (mHudOverlay == null) return;
+        int renderContext = nativeCricketGetRenderContext();
+        if (renderContext == 0 && mSelectedHudContext == HUD_OFF) {
+            // Auto-arm player's saved batting preference when entering open match play
+            mSelectedHudContext = (mBattingMode == 1) ? HUD_BATTING_CLASSIC : HUD_BATTING_SWIPE;
+        }
+        boolean requested = mSelectedHudContext >= HUD_BATTING_SWIPE &&
+            mSelectedHudContext <= HUD_BALL_DEAD;
+        boolean shouldShow = requested && renderContext == 0;
+        if (renderContext != mAppliedRenderContext || mSelectedHudContext != mAppliedHudContext) {
+            if (shouldShow) nativeCricketSetGamePhase(nativePhaseForHudContext(mSelectedHudContext));
+            else nativeCricketSetGamePhase(0); // also clears any held touch input
+            mHudOverlay.setGameplayContext(mSelectedHudContext);
+            mHudOverlay.setGameplayControlsEnabled(shouldShow);
+            mHudVisible = shouldShow;
+            mAppliedRenderContext = renderContext;
+            mAppliedHudContext = mSelectedHudContext;
+            Log.i(TAG, "HUD state selected=" + mSelectedHudContext + " render=" + renderContext +
+                    " visible=" + shouldShow);
+        } else if (shouldShow != mHudVisible) {
+            if (shouldShow) nativeCricketSetGamePhase(nativePhaseForHudContext(mSelectedHudContext));
+            else nativeCricketSetGamePhase(0);
+            mHudOverlay.setGameplayControlsEnabled(shouldShow);
+            mHudVisible = shouldShow;
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        new AlertDialog.Builder(this)
+            .setTitle("Mobile controls - choose current context")
+            .setSingleChoiceItems(mHudContextChoices, mSelectedHudContext, (dialog, which) -> {
+                selectHudContext(which);
+                dialog.dismiss();
+            })
+            .setNegativeButton("Close", (dialog, which) -> dialog.dismiss())
+            .show();
     }
 
     private void testAudioPlayback() {
@@ -180,6 +310,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
         Log.i(TAG, "surfaceChanged: Format=" + format + " Dimensions=" + width + "x" + height);
         nativeCricketResize(width, height);
+        if (mHudOverlay != null) mHudOverlay.setRenderViewport(nativeCricketGetRenderViewport());
     }
 
     @Override
@@ -187,6 +318,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
         Log.i(TAG, "surfaceDestroyed: Detaching native surface...");
         mIsRunning = false;
         mHandler.removeCallbacks(mRenderLoop);
+        nativeCricketInvalidateRenderContext();
+        mSelectedHudContext = HUD_OFF;
+        mHudVisible = false;
+        mAppliedRenderContext = Integer.MIN_VALUE;
+        mAppliedHudContext = Integer.MIN_VALUE;
+        nativeCricketSetGamePhase(0);
+        if (mHudOverlay != null) mHudOverlay.setGameplayControlsEnabled(false);
         nativeCricketSurfaceDestroyed();
     }
 
@@ -224,14 +362,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
         Log.i(TAG, "onPause: Pausing render loop...");
         mIsRunning = false;
         mHandler.removeCallbacks(mRenderLoop);
+        nativeCricketInvalidateRenderContext();
+        mSelectedHudContext = HUD_OFF;
+        mHudVisible = false;
+        mAppliedRenderContext = Integer.MIN_VALUE;
+        mAppliedHudContext = Integer.MIN_VALUE;
+        if (mHudOverlay != null) mHudOverlay.setGameplayControlsEnabled(false);
+        nativeCricketSetGamePhase(0);
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         Log.i(TAG, "onDestroy: Shutting down native harness...");
+        try {
+            unregisterReceiver(mContextReceiver);
+        } catch (Exception ignored) {}
         mIsRunning = false;
         mHandler.removeCallbacks(mRenderLoop);
+        nativeCricketInvalidateRenderContext();
         nativeCricketHarnessShutdown();
     }
 }

@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(cricket_native_harness C)
 
+# Diagnostic-only mode for operator-driven G.3 sessions. It disables the Phase F
+# frame-count input script and records a bounded touch trace; production/default
+# builds retain the existing behavior.
+option(CRICKET_G3_MANUAL_TRACE "Disable scripted inputs and trace operator touches" OFF)
+option(CRICKET_BUILD_INPUT_TESTS "Build the native mobile input verification runner" OFF)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -76,6 +82,10 @@ target_link_libraries(cricket_native_harness PRIVATE
     z
 )
 
+if(CRICKET_G3_MANUAL_TRACE)
+    target_compile_definitions(cricket_native_harness PRIVATE RC_G3_MANUAL_TRACE=1)
+endif()
+
 # Standalone Test Runner Executable
 add_executable(cricket_authentic_runner
     src/authentic_boot_runner.c
@@ -114,3 +124,11 @@ target_link_libraries(cricket_authentic_runner PRIVATE
     m
     z
 )
+
+if(CRICKET_BUILD_INPUT_TESTS)
+    add_executable(cricket_mobile_input_tests
+        src/test_mobile_input.c
+        src/mobile_input.c
+    )
+    target_link_libraries(cricket_mobile_input_tests PRIVATE android log m)
+endif()

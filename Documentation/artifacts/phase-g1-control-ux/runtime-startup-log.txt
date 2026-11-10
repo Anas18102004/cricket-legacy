@@ -1,0 +1,4 @@
+﻿--------- beginning of main
+11-10 12:43:35.854 18317 18317 I CricketLegacy-Main: Authentic Telemetry: Engine Frame #21 | FPS: 12.5 | RAM: 167268 KB (163.3 MB) | GameThread: RUNNING
+11-10 12:43:37.448 18317 18317 I CricketLegacy-Main: Authentic Telemetry: Engine Frame #46 | FPS: 15.7 | RAM: 167268 KB (163.3 MB) | GameThread: RUNNING
+11-10 12:43:38.949 18317 18317 I CricketLegacy-Main: Authentic Telemetry: Engine Frame #69 | FPS: 15.3 | RAM: 167464 KB (163.5 MB) | GameThread: RUNNING

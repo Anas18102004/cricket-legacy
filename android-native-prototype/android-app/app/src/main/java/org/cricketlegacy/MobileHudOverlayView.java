@@ -17,18 +17,14 @@ public class MobileHudOverlayView extends View {
     public interface InputEventListener {
         void onControlModeChanged(int newMode);
         void onTouchForward(int action, float x, float y, int pointerId);
+        void onHudLayoutChanged(float[] layout);
     }
 
     private InputEventListener mListener;
 
-    // Batting Modes: 0=Pure Swipe, 1=Classic Joystick, 2=Pro Joystick, 3=Hybrid
-    private int mBattingMode = 3;
-    private final String[] MODE_NAMES = {
-        "SWIPE ONLY",
-        "CLASSIC STICK",
-        "PRO JOYSTICK",
-        "HYBRID CONTROLS"
-    };
+    // Batting modes exposed by G.4: Swipe or Classic Joystick.
+    private int mBattingMode = 0;
+    private int mGameplayContext = 0;
 
     // UI Configuration
     private boolean mLeftHanded = false;
@@ -52,6 +48,8 @@ public class MobileHudOverlayView extends View {
     // Joystick State
     private float mJoyBaseX, mJoyBaseY, mJoyRadius;
     private float mJoyKnobX, mJoyKnobY, mJoyKnobRadius;
+    private float mViewportLeft, mViewportTop, mViewportWidth, mViewportHeight;
+    private float mDensity;
     private boolean mJoyActive = false;
     private int mJoyPointerId = -1;
 
@@ -66,7 +64,6 @@ public class MobileHudOverlayView extends View {
     }
 
     private final List<HudButton> mButtons = new ArrayList<>();
-    private final RectF mModePillRect = new RectF();
 
     // Swipe Visualizer
     private static class SwipeVisual {
@@ -75,7 +72,8 @@ public class MobileHudOverlayView extends View {
         long timestamp;
         boolean isLoft;
     }
-    private final List<SwipeVisual> mRecentSwipes = new ArrayList<>();
+    private final SwipeVisual mActiveSwipe = new SwipeVisual();
+    private boolean mHasActiveSwipe = false;
 
     // Multi-touch tracking
     private static class PointerTrack {
@@ -94,46 +92,46 @@ public class MobileHudOverlayView extends View {
     }
 
     private void init() {
+        mDensity = getResources().getDisplayMetrics().density;
         for (int i = 0; i < mTracks.length; i++) {
             mTracks[i] = new PointerTrack();
             mTracks[i].id = -1;
         }
 
-        // Joystick base: Translucent dark slate with cyan rim
-        mJoystickBasePaint.setColor(Color.argb(80, 20, 30, 45));
+        // Low contrast idle controls preserve the original game's artwork.
+        mJoystickBasePaint.setColor(Color.argb(58, 12, 18, 24));
         mJoystickBasePaint.setStyle(Paint.Style.FILL);
 
-        // Joystick knob: Glowing cyan
-        mJoystickKnobPaint.setColor(Color.argb(200, 0, 220, 255));
+        mJoystickKnobPaint.setColor(Color.argb(225, 226, 231, 234));
         mJoystickKnobPaint.setStyle(Paint.Style.FILL);
 
         // Buttons
-        mButtonBgPaint.setColor(Color.argb(120, 25, 35, 55));
+        mButtonBgPaint.setColor(Color.argb(112, 13, 20, 27));
         mButtonBgPaint.setStyle(Paint.Style.FILL);
 
-        mButtonPressedPaint.setColor(Color.argb(220, 0, 180, 240));
+        mButtonPressedPaint.setColor(Color.argb(218, 190, 145, 66));
         mButtonPressedPaint.setStyle(Paint.Style.FILL);
 
-        mButtonTogglePaint.setColor(Color.argb(220, 255, 175, 0)); // Golden Amber
+        mButtonTogglePaint.setColor(Color.argb(214, 151, 111, 50));
         mButtonTogglePaint.setStyle(Paint.Style.FILL);
 
-        mButtonBorderPaint.setColor(Color.argb(180, 100, 180, 255));
+        mButtonBorderPaint.setColor(Color.argb(132, 238, 239, 228));
         mButtonBorderPaint.setStyle(Paint.Style.STROKE);
-        mButtonBorderPaint.setStrokeWidth(3.0f);
+        mButtonBorderPaint.setStrokeWidth(1.35f * mDensity);
 
         mButtonTextPaint.setColor(Color.WHITE);
-        mButtonTextPaint.setTextSize(26.0f);
+        mButtonTextPaint.setTextSize(12.0f * mDensity);
         mButtonTextPaint.setTextAlign(Paint.Align.CENTER);
         mButtonTextPaint.setFakeBoldText(true);
 
         // Swipe trail
-        mSwipeTrailPaint.setColor(Color.argb(230, 0, 240, 255));
+        mSwipeTrailPaint.setColor(Color.argb(165, 246, 224, 169));
         mSwipeTrailPaint.setStyle(Paint.Style.STROKE);
-        mSwipeTrailPaint.setStrokeWidth(6.0f);
+        mSwipeTrailPaint.setStrokeWidth(2.0f * mDensity);
         mSwipeTrailPaint.setStrokeCap(Paint.Cap.ROUND);
 
-        mSwipeLabelPaint.setColor(Color.argb(250, 255, 255, 255));
-        mSwipeLabelPaint.setTextSize(32.0f);
+        mSwipeLabelPaint.setColor(Color.argb(190, 255, 255, 248));
+        mSwipeLabelPaint.setTextSize(11.0f * mDensity);
         mSwipeLabelPaint.setTextAlign(Paint.Align.CENTER);
         mSwipeLabelPaint.setFakeBoldText(true);
 
@@ -150,81 +148,210 @@ public class MobileHudOverlayView extends View {
         this.mListener = listener;
     }
 
+    /**
+     * Enables gameplay controls only after the native host has positively
+     * identified a playable context. Menu and unknown states hide this view so
+     * its touch layer cannot intercept the original game's menu input.
+     */
+    public void setGameplayControlsEnabled(boolean enabled) {
+        setVisibility(enabled ? View.VISIBLE : View.GONE);
+        if (!enabled) {
+            mHasActiveSwipe = false;
+            mJoyActive = false;
+            mJoyPointerId = -1;
+            mJoyKnobX = mJoyBaseX;
+            mJoyKnobY = mJoyBaseY;
+            for (PointerTrack track : mTracks) {
+                track.id = -1;
+                track.isJoy = false;
+                track.targetButton = null;
+            }
+            for (HudButton button : mButtons) {
+                button.isPressed = false;
+                button.toggleState = false;
+            }
+            invalidate();
+        }
+    }
+
+    public void setGameplayContext(int context) {
+        if (mGameplayContext != context) {
+            mHasActiveSwipe = false;
+            mJoyActive = false;
+            mJoyPointerId = -1;
+            mJoyKnobX = mJoyBaseX;
+            mJoyKnobY = mJoyBaseY;
+            for (HudButton button : mButtons) {
+                button.isPressed = false;
+                button.toggleState = false;
+            }
+            for (PointerTrack track : mTracks) {
+                track.id = -1;
+                track.isJoy = false;
+                track.targetButton = null;
+            }
+        }
+        mGameplayContext = context;
+        invalidate();
+    }
+
+    public void setBattingMode(int mode) {
+        mBattingMode = mode == 1 ? 1 : 0;
+        mHasActiveSwipe = false;
+        invalidate();
+    }
+
+    private boolean isButtonVisible(HudButton button) {
+        if (mGameplayContext == 1 || mGameplayContext == 2 || mGameplayContext == 5)
+            return button.id >= 1 && button.id <= 3;
+        if (mGameplayContext == 3) return button.id >= 6 && button.id <= 9;
+        if (mGameplayContext == 4) return button.id == 4 || button.id == 5;
+        return false;
+    }
+
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (mViewportWidth <= 0 || mViewportHeight <= 0) {
+            mViewportLeft = 0;
+            mViewportTop = 0;
+            mViewportWidth = w;
+            mViewportHeight = h;
+        }
         layoutControls(w, h);
     }
 
-    private void layoutControls(int w, int h) {
-        float scale = Math.min((float) w / 1280.0f, (float) h / 720.0f);
-        if (scale < 0.7f) scale = 0.7f;
-        if (scale > 1.4f) scale = 1.4f;
+    public void setRenderViewport(int[] bounds) {
+        if (bounds == null || bounds.length < 6 || bounds[4] <= 0 || bounds[5] <= 0 ||
+                getWidth() <= 0 || getHeight() <= 0) return;
+        float sx = (float) getWidth() / bounds[4];
+        float sy = (float) getHeight() / bounds[5];
+        mViewportLeft = bounds[0] * sx;
+        mViewportTop = bounds[1] * sy;
+        mViewportWidth = bounds[2] * sx;
+        mViewportHeight = bounds[3] * sy;
+        layoutControls(getWidth(), getHeight());
+    }
 
-        // Joystick dimensions
-        mJoyRadius = 110.0f * scale;
-        mJoyKnobRadius = 45.0f * scale;
-        if (!mLeftHanded) {
-            mJoyBaseX = 180.0f * scale;
-            mJoyBaseY = h - 180.0f * scale;
-        } else {
-            mJoyBaseX = w - 180.0f * scale;
-            mJoyBaseY = h - 180.0f * scale;
+    private void layoutControls(int w, int h) {
+        if (mViewportWidth <= 0 || mViewportHeight <= 0) {
+            mViewportLeft = 0;
+            mViewportTop = 0;
+            mViewportWidth = w;
+            mViewportHeight = h;
         }
+        float margin = 24.0f * mDensity;
+        float shortSide = Math.min(mViewportWidth, mViewportHeight);
+        // The reference control uses a thumb-sized pad. Keep its physical size
+        // substantial while clamping it to the rendered viewport on compact screens.
+        mJoyRadius = Math.min(84.0f * mDensity, shortSide * 0.16f);
+        mJoyKnobRadius = mJoyRadius * 0.34f;
+        float joyInset = Math.max(mViewportWidth * 0.15f, mJoyRadius + margin);
+        mJoyBaseX = mLeftHanded ? mViewportLeft + mViewportWidth - joyInset : mViewportLeft + joyInset;
+        mJoyBaseY = mViewportTop + mViewportHeight * 0.62f;
         mJoyKnobX = mJoyBaseX;
         mJoyKnobY = mJoyBaseY;
 
-        // Mode Pill Top Right
-        float pillW = 220.0f * scale;
-        float pillH = 44.0f * scale;
-        mModePillRect.set(w - pillW - 24.0f, 20.0f, w - 24.0f, 20.0f + pillH);
-
-        // Action Buttons Setup
         mButtons.clear();
-        float btnSz = 90.0f * scale;
-        float gap = 24.0f * scale;
-        float rightClusterX = !mLeftHanded ? (w - 240.0f * scale) : (60.0f * scale);
-        float rightClusterY = h - 220.0f * scale;
+        float btnSz = Math.min(56.0f * mDensity, shortSide * 0.13f);
+        btnSz = Math.max(Math.min(48.0f * mDensity, shortSide * 0.12f), btnSz);
+        float gap = 12.0f * mDensity;
+        float clusterWidth = btnSz * 2 + gap;
+        float clusterX = mLeftHanded ? mViewportLeft + margin
+                : mViewportLeft + mViewportWidth - margin - clusterWidth;
+        // Keep the two-row action group above the original lower broadcast ticker.
+        float upperY = mViewportTop + mViewportHeight * 0.48f;
+        float lowerY = upperY + btnSz + gap;
 
         // Button 1: LOFT (Toggle)
         HudButton loftBtn = new HudButton();
         loftBtn.id = 1;
         loftBtn.label = "LOFT";
         loftBtn.isToggle = true;
-        loftBtn.rect.set(rightClusterX, rightClusterY - btnSz - gap, rightClusterX + btnSz, rightClusterY - gap);
+        loftBtn.rect.set(clusterX, upperY, clusterX + btnSz, upperY + btnSz);
         mButtons.add(loftBtn);
 
         // Button 2: ADVANCE
         HudButton advBtn = new HudButton();
         advBtn.id = 2;
         advBtn.label = "ADVANCE";
-        advBtn.rect.set(rightClusterX + btnSz + gap, rightClusterY - btnSz - gap, rightClusterX + btnSz * 2 + gap, rightClusterY - gap);
+        advBtn.rect.set(clusterX + btnSz + gap, upperY, clusterX + btnSz * 2 + gap, upperY + btnSz);
         mButtons.add(advBtn);
 
         // Button 3: DEFEND
         HudButton defBtn = new HudButton();
         defBtn.id = 3;
         defBtn.label = "DEFEND";
-        defBtn.rect.set(rightClusterX - btnSz - gap, rightClusterY, rightClusterX - gap, rightClusterY + btnSz);
+        defBtn.rect.set(clusterX + (btnSz + gap) * 0.5f, lowerY,
+                clusterX + (btnSz + gap) * 0.5f + btnSz, lowerY + btnSz);
         mButtons.add(defBtn);
 
         // Button 4: RUN
         HudButton runBtn = new HudButton();
         runBtn.id = 4;
         runBtn.label = "RUN";
-        runBtn.rect.set(rightClusterX, rightClusterY, rightClusterX + btnSz, rightClusterY + btnSz);
+        float runSize = Math.min(78.0f * mDensity,
+                Math.max(48.0f * mDensity, mViewportHeight * 0.12f));
+        float runY = mViewportTop + mViewportHeight * 0.64f;
+        float runX = mLeftHanded ? mViewportLeft + margin
+                : mViewportLeft + mViewportWidth - margin - runSize * 2 - gap;
+        runBtn.rect.set(runX, runY, runX + runSize, runY + runSize);
         mButtons.add(runBtn);
 
         // Button 5: CANCEL RUN
         HudButton cancelBtn = new HudButton();
         cancelBtn.id = 5;
         cancelBtn.label = "CANCEL";
-        cancelBtn.rect.set(rightClusterX + btnSz + gap, rightClusterY, rightClusterX + btnSz * 2 + gap, rightClusterY + btnSz);
+        cancelBtn.rect.set(runX + runSize + gap, runY, runX + runSize * 2 + gap, runY + runSize);
         mButtons.add(cancelBtn);
+
+        HudButton standardBtn = new HudButton();
+        standardBtn.id = 6;
+        standardBtn.label = "STANDARD";
+        standardBtn.rect.set(clusterX, upperY, clusterX + btnSz, upperY + btnSz);
+        mButtons.add(standardBtn);
+
+        HudButton swingBtn = new HudButton();
+        swingBtn.id = 7;
+        swingBtn.label = "SWING";
+        swingBtn.rect.set(clusterX + btnSz + gap, upperY,
+                clusterX + btnSz * 2 + gap, upperY + btnSz);
+        mButtons.add(swingBtn);
+
+        HudButton cutBtn = new HudButton();
+        cutBtn.id = 8;
+        cutBtn.label = "CUT";
+        cutBtn.rect.set(clusterX, lowerY, clusterX + btnSz, lowerY + btnSz);
+        mButtons.add(cutBtn);
+
+        HudButton bouncerBtn = new HudButton();
+        bouncerBtn.id = 9;
+        bouncerBtn.label = "BOUNCER";
+        bouncerBtn.rect.set(clusterX + btnSz + gap, lowerY,
+                clusterX + btnSz * 2 + gap, lowerY + btnSz);
+        mButtons.add(bouncerBtn);
+        dispatchNativeLayout();
+    }
+
+    public void dispatchNativeLayout() {
+        if (mListener == null || mViewportWidth <= 0 || mViewportHeight <= 0 || mButtons.size() < 9) return;
+        float[] layout = new float[39];
+        layout[0] = mJoyBaseX;
+        layout[1] = mJoyBaseY;
+        layout[2] = mJoyRadius;
+        for (int i = 0; i < 9; i++) {
+            HudButton button = mButtons.get(i);
+            int offset = 3 + i * 4;
+            layout[offset] = button.rect.left;
+            layout[offset + 1] = button.rect.top;
+            layout[offset + 2] = button.rect.width();
+            layout[offset + 3] = button.rect.height();
+        }
+        mListener.onHudLayoutChanged(layout);
     }
 
     public void cycleControlMode() {
-        mBattingMode = (mBattingMode + 1) % 4;
+        mBattingMode = (mBattingMode + 1) % 2;
         if (mListener != null) {
             mListener.onControlModeChanged(mBattingMode);
         }
@@ -242,10 +369,9 @@ public class MobileHudOverlayView extends View {
             float px = event.getX(actionIndex);
             float py = event.getY(actionIndex);
 
-            // 1. Check Mode Switch Pill
-            if (mModePillRect.contains(px, py)) {
-                cycleControlMode();
-                return true;
+            if (px < mViewportLeft || py < mViewportTop ||
+                    px >= mViewportLeft + mViewportWidth || py >= mViewportTop + mViewportHeight) {
+                return action == MotionEvent.ACTION_DOWN ? false : true;
             }
 
             // Find free track slot
@@ -260,6 +386,7 @@ public class MobileHudOverlayView extends View {
 
                 // Check button bounds
                 for (HudButton btn : mButtons) {
+                    if (!isButtonVisible(btn)) continue;
                     if (btn.rect.contains(px, py)) {
                         track.targetButton = btn;
                         btn.isPressed = true;
@@ -272,7 +399,8 @@ public class MobileHudOverlayView extends View {
                 }
 
                 // Check Joystick zone
-                if (track.targetButton == null) {
+                if (track.targetButton == null &&
+                    (mGameplayContext == 1 || mGameplayContext == 2) && mBattingMode == 1) {
                     float jdx = px - mJoyBaseX;
                     float jdy = py - mJoyBaseY;
                     float dist = (float) Math.sqrt(jdx * jdx + jdy * jdy);
@@ -304,6 +432,21 @@ public class MobileHudOverlayView extends View {
                     if (track.isJoy) {
                         updateJoystickKnob(px, py);
                         invalidate();
+                    } else if (mBattingMode == 0 && mGameplayContext == 1 &&
+                            track.targetButton == null) {
+                        float dx = px - track.startX;
+                        float dy = py - track.startY;
+                        if (Math.hypot(dx, dy) >= 8.0f * mDensity) {
+                            mActiveSwipe.x0 = track.startX;
+                            mActiveSwipe.y0 = track.startY;
+                            mActiveSwipe.x1 = px;
+                            mActiveSwipe.y1 = py;
+                            mActiveSwipe.sectorLabel = getSectorLabel(dx, dy);
+                            mActiveSwipe.isLoft = mButtons.get(0).toggleState;
+                            mActiveSwipe.timestamp = now;
+                            mHasActiveSwipe = true;
+                            invalidate();
+                        }
                     }
                 }
                 if (mListener != null) {
@@ -319,6 +462,8 @@ public class MobileHudOverlayView extends View {
 
             PointerTrack track = findTrack(pId);
             if (track != null) {
+                boolean wasButton = track.targetButton != null;
+                boolean wasJoystick = track.isJoy;
                 if (track.targetButton != null) {
                     if (!track.targetButton.isToggle) {
                         track.targetButton.isPressed = false;
@@ -327,36 +472,34 @@ public class MobileHudOverlayView extends View {
                     invalidate();
                 }
 
-                if (track.isJoy) {
+                if (wasJoystick) {
                     mJoyActive = false;
                     mJoyPointerId = -1;
                     mJoyKnobX = mJoyBaseX;
                     mJoyKnobY = mJoyBaseY;
                     invalidate();
-                } else if (track.targetButton == null) {
-                    // Evaluate visual swipe
-                    float dx = px - track.startX;
-                    float dy = py - track.startY;
-                    float dist = (float) Math.sqrt(dx * dx + dy * dy);
-                    long duration = now - track.startTime;
-                    if (dist > 30.0f && duration < 500) {
-                        SwipeVisual sv = new SwipeVisual();
-                        sv.x0 = track.startX;
-                        sv.y0 = track.startY;
-                        sv.x1 = px;
-                        sv.y1 = py;
-                        sv.timestamp = now;
-                        sv.isLoft = mButtons.get(0).toggleState;
-                        sv.sectorLabel = getSectorLabel(dx, dy);
-                        synchronized (mRecentSwipes) {
-                            mRecentSwipes.add(sv);
-                            if (mRecentSwipes.size() > 5) mRecentSwipes.remove(0);
-                        }
-                        invalidate();
-                    }
                 }
+                if (action != MotionEvent.ACTION_CANCEL) mHasActiveSwipe = false;
 
                 track.id = -1;
+            }
+
+            if (action == MotionEvent.ACTION_CANCEL) {
+                mJoyActive = false;
+                mJoyPointerId = -1;
+                mJoyKnobX = mJoyBaseX;
+                mJoyKnobY = mJoyBaseY;
+                mHasActiveSwipe = false;
+                for (PointerTrack active : mTracks) {
+                    active.id = -1;
+                    active.isJoy = false;
+                    active.targetButton = null;
+                }
+                for (HudButton button : mButtons) {
+                    button.isPressed = false;
+                    button.toggleState = false;
+                }
+                invalidate();
             }
 
             if (mListener != null) {
@@ -417,60 +560,43 @@ public class MobileHudOverlayView extends View {
         long now = System.currentTimeMillis();
 
         // 1. Draw Joystick if Batting Mode is not Pure Swipe
-        if (mBattingMode != 0) {
-            // Base ring
+        if ((mGameplayContext == 1 || mGameplayContext == 2 || mGameplayContext == 5) && mBattingMode == 1) {
             canvas.drawCircle(mJoyBaseX, mJoyBaseY, mJoyRadius, mJoystickBasePaint);
             canvas.drawCircle(mJoyBaseX, mJoyBaseY, mJoyRadius, mButtonBorderPaint);
-            // Deadzone guide
+            mButtonBorderPaint.setAlpha(55);
             canvas.drawCircle(mJoyBaseX, mJoyBaseY, mJoyRadius * mDeadzone, mButtonBorderPaint);
-            // Thumb knob
+            mButtonBorderPaint.setAlpha(132);
             canvas.drawCircle(mJoyKnobX, mJoyKnobY, mJoyKnobRadius, mJoystickKnobPaint);
         }
 
         // 2. Draw Virtual Action Buttons
         for (HudButton btn : mButtons) {
+            if (!isButtonVisible(btn)) continue;
             Paint bg = btn.isPressed ? mButtonPressedPaint :
                        (btn.isToggle && btn.toggleState ? mButtonTogglePaint : mButtonBgPaint);
-            canvas.drawRoundRect(btn.rect, 16.0f, 16.0f, bg);
-            canvas.drawRoundRect(btn.rect, 16.0f, 16.0f, mButtonBorderPaint);
+            float corner = Math.min(btn.rect.width(), btn.rect.height()) * 0.30f;
+            canvas.drawRoundRect(btn.rect, corner, corner, bg);
+            canvas.drawRoundRect(btn.rect, corner, corner, mButtonBorderPaint);
 
+            float labelSizeDp = btn.label.length() >= 7 ? 10.0f :
+                    (btn.label.length() >= 6 ? 10.8f : 12.0f);
+            mButtonTextPaint.setTextSize(labelSizeDp * mDensity);
             float textY = btn.rect.centerY() - ((mButtonTextPaint.descent() + mButtonTextPaint.ascent()) / 2);
             canvas.drawText(btn.label, btn.rect.centerX(), textY, mButtonTextPaint);
         }
+        mButtonTextPaint.setTextSize(12.0f * mDensity);
 
-        // 3. Draw Top Control Mode Selector Pill
-        canvas.drawRoundRect(mModePillRect, 22.0f, 22.0f, mButtonBgPaint);
-        canvas.drawRoundRect(mModePillRect, 22.0f, 22.0f, mButtonBorderPaint);
-        float pillTextY = mModePillRect.centerY() - ((mButtonTextPaint.descent() + mButtonTextPaint.ascent()) / 2);
-        canvas.drawText(MODE_NAMES[mBattingMode], mModePillRect.centerX(), pillTextY, mButtonTextPaint);
-
-        // 4. Draw Recent Swipe Visualizer Trails
-        boolean hasActiveSwipe = false;
-        synchronized (mRecentSwipes) {
-            for (int i = mRecentSwipes.size() - 1; i >= 0; i--) {
-                SwipeVisual sv = mRecentSwipes.get(i);
-                long elapsed = now - sv.timestamp;
-                if (elapsed > 400) {
-                    mRecentSwipes.remove(i);
-                } else {
-                    hasActiveSwipe = true;
-                    int alpha = (int) (240.0f * (1.0f - (float) elapsed / 400.0f));
-                    mSwipeTrailPaint.setAlpha(alpha);
-                    mSwipeLabelPaint.setAlpha(alpha);
-
-                    // Draw glowing stroke line
-                    canvas.drawLine(sv.x0, sv.y0, sv.x1, sv.y1, mSwipeTrailPaint);
-                    canvas.drawCircle(sv.x1, sv.y1, 10.0f, mSwipeTrailPaint);
-
-                    // Draw shot text near stroke tip
-                    String label = sv.isLoft ? "LOFTED " + sv.sectorLabel : sv.sectorLabel;
-                    canvas.drawText(label, (sv.x0 + sv.x1) * 0.5f, Math.min(sv.y0, sv.y1) - 20.0f, mSwipeLabelPaint);
-                }
-            }
-        }
-
-        // Keep animating swipe fadeout
-        if (hasActiveSwipe) {
+        // Direction and sector feedback exists only while the finger is down.
+        if (mHasActiveSwipe && mBattingMode == 0 && mGameplayContext == 1) {
+            mSwipeTrailPaint.setAlpha(170);
+            mSwipeLabelPaint.setAlpha(220);
+            canvas.drawLine(mActiveSwipe.x0, mActiveSwipe.y0,
+                    mActiveSwipe.x1, mActiveSwipe.y1, mSwipeTrailPaint);
+            canvas.drawCircle(mActiveSwipe.x1, mActiveSwipe.y1,
+                    4.0f * mDensity, mSwipeTrailPaint);
+            String label = mActiveSwipe.sectorLabel + (mActiveSwipe.isLoft ? " · LOFT" : "");
+            canvas.drawText(label, mActiveSwipe.x1,
+                    mActiveSwipe.y1 - 12.0f * mDensity, mSwipeLabelPaint);
             postInvalidateOnAnimation();
         }
     }
