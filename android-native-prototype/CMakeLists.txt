@@ -37,6 +37,8 @@ add_library(cricket_native_harness SHARED
     src/upstream_d3d8/render_wgpu.c
     src/upstream_d3d8/d3d8_android_adapter.c
     src/test_d3d8_scene.c
+    src/game_static_data.c
+    src/test_stage1_memory.c
 )
 
 target_link_directories(cricket_native_harness PRIVATE

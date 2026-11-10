@@ -11,6 +11,8 @@
 #include "test_wgpu_render.h"
 #include "upstream_d3d8/d3d8_android_adapter.h"
 #include "test_d3d8_scene.h"
+#include "game_static_data.h"
+#include "test_stage1_memory.h"
 
 #define LOG_TAG "CricketNativeHarness"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -61,7 +63,15 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessInit(JNIEnv* env, jclass
         return JNI_FALSE;
     }
 
-    // 4. Initial telemetry
+    // 4. Phase C.2 Stage 1: Game Static Data & Original Memory Verification Suite
+    LOGI("Executing Phase C.2 Stage 1 Static Data and Memory Suite...");
+    if (!run_stage1_memory_tests()) {
+        LOGE("Phase C.2 Stage 1 memory tests FAILED!");
+        return JNI_FALSE;
+    }
+    LOGI("Phase C.2 Stage 1 Static Data and Memory Suite PASSED successfully!");
+
+    // 5. Initial telemetry
     size_t rss_kb = cricket_get_resident_memory_kb();
     LOGI("Initial Native Resident RAM: %zu KB (%.2f MB)", rss_kb, (float)rss_kb / 1024.0f);
 

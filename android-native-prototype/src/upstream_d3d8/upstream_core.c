@@ -13,6 +13,8 @@ int g_screen_h = 720;
 int g_window_w = 1280;
 int g_window_h = 720;
 
+uint32_t g_image_lo = 0;
+uint32_t g_image_hi = 0;
 uint32_t g_state_lo = 0;
 uint32_t g_state_hi = 0;
 uint32_t g_det_sleeps = 0;
