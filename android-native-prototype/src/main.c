@@ -19,6 +19,8 @@
 #include "test_stage2_io_timers.h"
 #include "game_crt_winmain.h"
 #include "test_stage3_crt_startup.h"
+#include "game_loop.h"
+#include "test_stage4_game_loop.h"
 
 #define LOG_TAG "CricketNativeHarness"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -93,7 +95,15 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessInit(JNIEnv* env, jclass
     }
     LOGI("Phase C.2 Stage 3 CRT Startup and WinMain Trampoline Suite PASSED successfully!");
 
-    // 7. Initial telemetry
+    // 7. Phase C.2 Stage 4: Engine Main Operating Loop Verification Suite
+    LOGI("Executing Phase C.2 Stage 4 Engine Main Operating Loop Suite...");
+    if (!run_stage4_game_loop_tests()) {
+        LOGE("Phase C.2 Stage 4 game operating loop tests FAILED!");
+        return JNI_FALSE;
+    }
+    LOGI("Phase C.2 Stage 4 Engine Main Operating Loop Suite PASSED successfully!");
+
+    // 8. Initial telemetry
     size_t rss_kb = cricket_get_resident_memory_kb();
     LOGI("Initial Native Resident RAM: %zu KB (%.2f MB)", rss_kb, (float)rss_kb / 1024.0f);
 
@@ -203,6 +213,7 @@ JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketOnTouch(JNIEnv* env, jclass clazz, 
                                                         jint action, jfloat x, jfloat y, jint pointer_id) {
     uint64_t now_ns = get_time_ns();
+    game_loop_post_touch(action, x, y);
     LOGI("Touch Event: Action=%d, Pos=(%.1f, %.1f), Finger=%d, Time=%llu ns", 
          action, x, y, pointer_id, (unsigned long long)now_ns);
 }
@@ -269,6 +280,7 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessShutdown(JNIEnv* env, jc
         ANativeWindow_release(g_native_window);
         g_native_window = NULL;
     }
+    game_loop_shutdown();
     crt_startup_shutdown();
     game_lazy_views_shutdown();
     game_file_io_shutdown();
