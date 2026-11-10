@@ -17,6 +17,8 @@
 #include "game_timers.h"
 #include "game_lazy_views.h"
 #include "test_stage2_io_timers.h"
+#include "game_crt_winmain.h"
+#include "test_stage3_crt_startup.h"
 
 #define LOG_TAG "CricketNativeHarness"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -83,7 +85,15 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessInit(JNIEnv* env, jclass
     }
     LOGI("Phase C.2 Stage 2 File I/O and Timers Suite PASSED successfully!");
 
-    // 6. Initial telemetry
+    // 6. Phase C.2 Stage 3: CRT Startup and WinMain Trampoline Verification Suite
+    LOGI("Executing Phase C.2 Stage 3 CRT Startup and WinMain Trampoline Suite...");
+    if (!run_stage3_crt_startup_tests()) {
+        LOGE("Phase C.2 Stage 3 CRT startup tests FAILED!");
+        return JNI_FALSE;
+    }
+    LOGI("Phase C.2 Stage 3 CRT Startup and WinMain Trampoline Suite PASSED successfully!");
+
+    // 7. Initial telemetry
     size_t rss_kb = cricket_get_resident_memory_kb();
     LOGI("Initial Native Resident RAM: %zu KB (%.2f MB)", rss_kb, (float)rss_kb / 1024.0f);
 
@@ -259,6 +269,7 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessShutdown(JNIEnv* env, jc
         ANativeWindow_release(g_native_window);
         g_native_window = NULL;
     }
+    crt_startup_shutdown();
     game_lazy_views_shutdown();
     game_file_io_shutdown();
     cricket_memory_cleanup(&g_arena);

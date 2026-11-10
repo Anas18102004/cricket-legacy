@@ -43,6 +43,8 @@ add_library(cricket_native_harness SHARED
     src/game_timers.c
     src/game_lazy_views.c
     src/test_stage2_io_timers.c
+    src/game_crt_winmain.c
+    src/test_stage3_crt_startup.c
 )
 
 target_link_directories(cricket_native_harness PRIVATE
