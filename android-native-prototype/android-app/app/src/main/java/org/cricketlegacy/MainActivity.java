@@ -1,12 +1,16 @@
 package org.cricketlegacy;
 
 import android.app.Activity;
+import android.content.Context;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -14,8 +18,9 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 
-public class MainActivity extends Activity implements SurfaceHolder.Callback, View.OnTouchListener {
+public class MainActivity extends Activity implements SurfaceHolder.Callback, View.OnTouchListener, MobileHudOverlayView.InputEventListener {
     private static final String TAG = "CricketLegacyApp";
 
     static {
@@ -43,7 +48,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     public static native boolean nativeCricketAudioTest();
     public static native void nativeCricketHarnessShutdown();
 
+    // Mobile Input JNI Declarations
+    public static native void nativeCricketConfigureInput(int battingMode, int bowlingMode,
+                                                          float deadzone, float sensitivity,
+                                                          boolean leftHanded, boolean haptics);
+    public static native boolean nativeCricketPollHaptic();
+    public static native long nativeCricketGetInputLatencyUs();
+    public static native void nativeCricketSetGamePhase(int phase);
+
     private SurfaceView mSurfaceView;
+    private MobileHudOverlayView mHudOverlay;
+    private Vibrator mVibrator;
     private Handler mHandler;
     private boolean mIsRunning = false;
 
@@ -52,6 +67,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
         public void run() {
             if (mIsRunning) {
                 nativeCricketRenderFrame();
+
+                // Poll native haptic pulse
+                if (nativeCricketPollHaptic() && mVibrator != null && mVibrator.hasVibrator()) {
+                    triggerHapticFeedback();
+                }
+
                 mHandler.postDelayed(this, 16); // ~60 FPS update pacing
             }
         }
@@ -67,19 +88,56 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
 
         Log.i(TAG, "Cricket Legacy Activity onCreate starting...");
         mHandler = new Handler(Looper.getMainLooper());
+        mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
         // Initialize native harness
         boolean initOk = nativeCricketHarnessInit();
         Log.i(TAG, "Native Harness Initialization status: " + (initOk ? "SUCCESS" : "FAILED"));
 
-        // Setup SurfaceView
+        // Setup Root Layout containing SurfaceView + Mobile HUD Overlay
+        FrameLayout rootLayout = new FrameLayout(this);
+
         mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
-        mSurfaceView.setOnTouchListener(this);
-        setContentView(mSurfaceView);
+        rootLayout.addView(mSurfaceView, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        mHudOverlay = new MobileHudOverlayView(this);
+        mHudOverlay.setListener(this);
+        rootLayout.addView(mHudOverlay, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        setContentView(rootLayout);
+
+        // Apply default input configuration
+        nativeCricketConfigureInput(3 /* HYBRID */, 0 /* GESTURE_AIM */, 0.15f, 1.0f, false, true);
 
         // Test basic audio output via AudioTrack synthetic sine wave
         testAudioPlayback();
+    }
+
+    private void triggerHapticFeedback() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                mVibrator.vibrate(VibrationEffect.createOneShot(25, VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                mVibrator.vibrate(25);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Haptic vibration failed: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void onControlModeChanged(int newMode) {
+        Log.i(TAG, "User toggled control mode to: " + newMode);
+        nativeCricketConfigureInput(newMode, 0, 0.15f, 1.0f, false, true);
+        triggerHapticFeedback();
+    }
+
+    @Override
+    public void onTouchForward(int action, float x, float y, int pointerId) {
+        nativeCricketOnTouch(action, x, y, pointerId);
     }
 
     private void testAudioPlayback() {
@@ -135,12 +193,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     @Override
     public boolean onTouch(View v, MotionEvent event) {
         int action = event.getActionMasked();
-        int pointerIndex = event.getActionIndex();
-        int pointerId = event.getPointerId(pointerIndex);
-        float x = event.getX(pointerIndex);
-        float y = event.getY(pointerIndex);
-
-        nativeCricketOnTouch(action, x, y, pointerId);
+        if (action == MotionEvent.ACTION_MOVE) {
+            int pointerCount = event.getPointerCount();
+            for (int i = 0; i < pointerCount; i++) {
+                nativeCricketOnTouch(action, event.getX(i), event.getY(i), event.getPointerId(i));
+            }
+        } else {
+            int pointerIndex = event.getActionIndex();
+            int pointerId = event.getPointerId(pointerIndex);
+            float x = event.getX(pointerIndex);
+            float y = event.getY(pointerIndex);
+            nativeCricketOnTouch(action, x, y, pointerId);
+        }
         return true;
     }
 

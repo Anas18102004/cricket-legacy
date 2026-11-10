@@ -18,6 +18,7 @@
 #include "recomp.h"
 #include "render.h"
 #include "d3d8.h"
+#include "mobile_input.h"
 
 #define TAG "CricketLegacy-Main"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -153,6 +154,9 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessInit(JNIEnv* env, jclass
 
     setenv("RC_PACE60", "1", 1);
 
+    // Initialize native mobile input system
+    mobile_input_init(g_window_w > 0 ? g_window_w : 1280, g_window_h > 0 ? g_window_h : 720);
+
     // 2. Register Windows API import handlers
     LOGI("[Init] Registering host import tables...");
     static ImportHandler all_imports[2048];
@@ -253,6 +257,7 @@ Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass 
     g_window_h = height;
     g_screen_w = width;
     g_screen_h = height;
+    mobile_input_resize((int)width, (int)height);
 
     LOGI("Bound ANativeWindow: %p (Resolution: %dx%d)", win, width, height);
 
@@ -294,6 +299,7 @@ Java_org_cricketlegacy_MainActivity_nativeCricketResize(JNIEnv* env, jclass claz
     g_window_h = (int)height;
     g_screen_w = (int)width;
     g_screen_h = (int)height;
+    mobile_input_resize((int)width, (int)height);
     if (g_device) {
         g_device->width = (uint32_t)width;
         g_device->height = (uint32_t)height;
@@ -320,9 +326,11 @@ Java_org_cricketlegacy_MainActivity_nativeCricketOnTouch(JNIEnv* env, jclass cla
                                                         jint action, jfloat x, jfloat y, jint pointer_id) {
     (void)env;
     (void)clazz;
-    (void)pointer_id;
 
-    // Map screen touch to 640x480 virtual game coords taking pillarbox into account
+    // 1. Dispatch into native multi-pointer mobile input subsystem (joystick, swipe, buttons)
+    mobile_input_on_touch(action, x, y, pointer_id);
+
+    // 2. Map screen touch to 640x480 virtual game coords taking pillarbox into account for direct menu clicks
     int surf_w = (g_surf_w > 0) ? g_surf_w : g_window_w;
     int surf_h = (g_surf_h > 0) ? g_surf_h : g_window_h;
     int bar_x = (g_window_w > surf_w) ? (g_window_w - surf_w) / 2 : 0;
@@ -338,58 +346,22 @@ Java_org_cricketlegacy_MainActivity_nativeCricketOnTouch(JNIEnv* env, jclass cla
     if (game_y < 0) game_y = 0;
     if (game_y > 479) game_y = 479;
 
-    float norm_x = (g_window_w > 0) ? (x / (float)g_window_w) : 0.5f;
-    float norm_y = (g_window_h > 0) ? (y / (float)g_window_h) : 0.5f;
+    static float s_prev_touch_x = 0.0f;
+    static float s_prev_touch_y = 0.0f;
+    int masked = action & 0xFF;
 
-    static float s_last_touch_x = 0.0f;
-    static float s_last_touch_y = 0.0f;
-    static uint32_t s_pad_buttons = 0;
-    static int32_t s_axis[4] = {0, 0, 0, 0};
-
-    if (action == 0 /* DOWN */) {
-        s_last_touch_x = x;
-        s_last_touch_y = y;
-
-        LOGI("nativeCricketOnTouch DOWN: screen=(%.1f, %.1f) game=(%d, %d)", x, y, game_x, game_y);
+    if (masked == 0 /* DOWN */ || masked == 5 /* POINTER_DOWN */) {
+        s_prev_touch_x = x;
+        s_prev_touch_y = y;
         input_tap(game_x, game_y);
-
-        if (norm_x > 0.75f && norm_y > 0.65f) {
-            // Bottom-right: Primary action (Enter / Space / Button A)
-            s_pad_buttons |= (1u << 0);
-            input_key_dik(0x1C, 1);
-            input_key_dik(0x39, 1);
-            input_gamepad(0, 1, s_pad_buttons, s_axis[0], s_axis[1], 0, 0);
-        }
-    } else if (action == 2 /* MOVE */) {
-        int dx = (int)(x - s_last_touch_x);
-        int dy = (int)(y - s_last_touch_y);
-        s_last_touch_x = x;
-        s_last_touch_y = y;
-
+    } else if (masked == 2 /* MOVE */) {
+        int dx = (int)(x - s_prev_touch_x);
+        int dy = (int)(y - s_prev_touch_y);
+        s_prev_touch_x = x;
+        s_prev_touch_y = y;
         input_tap_move(dx, dy);
-
-        if (norm_x < 0.35f) {
-            // Left region: Virtual stick
-            float stick_x = (norm_x - 0.17f) / 0.15f;
-            float stick_y = (norm_y - 0.55f) / 0.25f;
-            if (stick_x < -1.0f) stick_x = -1.0f;
-            if (stick_x > 1.0f) stick_x = 1.0f;
-            if (stick_y < -1.0f) stick_y = -1.0f;
-            if (stick_y > 1.0f) stick_y = 1.0f;
-            s_axis[0] = (int32_t)(stick_x * 32767.0f);
-            s_axis[1] = (int32_t)(stick_y * 32767.0f);
-            input_gamepad(0, 1, s_pad_buttons, s_axis[0], s_axis[1], 0, 0);
-        }
-    } else if (action == 1 /* UP */) {
-        LOGI("nativeCricketOnTouch UP");
+    } else if (masked == 1 /* UP */ || masked == 6 /* POINTER_UP */ || masked == 3 /* CANCEL */) {
         input_tap_release();
-        s_pad_buttons = 0;
-        s_axis[0] = 0;
-        s_axis[1] = 0;
-        input_key_dik(0x1C, 0);
-        input_key_dik(0x39, 0);
-        input_key_dik(0x01, 0);
-        input_gamepad(0, 1, 0, 0, 0, 0, 0);
     }
 }
 
@@ -398,6 +370,9 @@ JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketRenderFrame(JNIEnv* env, jclass clazz) {
     (void)env;
     (void)clazz;
+
+    // Advance native mobile input frame tick (decrementing stroke pulses, etc.)
+    mobile_input_frame_tick();
     static uint64_t s_frame_call_count = 0;
     static uint32_t s_last_engine_frame = 0;
     static struct timespec s_last_time;
@@ -602,4 +577,52 @@ Java_org_cricketlegacy_MainActivity_nativeCricketHarnessShutdown(JNIEnv* env, jc
         g_android_native_window = NULL;
     }
     LOGI("Harness shutdown complete.");
+}
+
+// JNI Entry: Configure mobile input parameters
+JNIEXPORT void JNICALL
+Java_org_cricketlegacy_MainActivity_nativeCricketConfigureInput(JNIEnv* env, jclass clazz,
+                                                               jint battingMode, jint bowlingMode,
+                                                               jfloat deadzone, jfloat sensitivity,
+                                                               jboolean leftHanded, jboolean haptics) {
+    (void)env;
+    (void)clazz;
+    MobileInputConfig cfg;
+    mobile_input_get_config(&cfg);
+    cfg.batting_mode = (BattingControlMode)battingMode;
+    cfg.bowling_mode = (BowlingControlMode)bowlingMode;
+    cfg.joystick_deadzone = deadzone;
+    cfg.joystick_sensitivity = sensitivity;
+    cfg.swipe_sensitivity = sensitivity;
+    cfg.left_handed = (leftHanded == JNI_TRUE);
+    cfg.haptics_enabled = (haptics == JNI_TRUE);
+    mobile_input_configure(&cfg);
+    LOGI("[NativeInput] Configure applied: battingMode=%d deadzone=%.2f sens=%.2f leftHanded=%d haptics=%d",
+         battingMode, deadzone, sensitivity, leftHanded, haptics);
+}
+
+// JNI Entry: Poll haptic vibration pulse
+JNIEXPORT jboolean JNICALL
+Java_org_cricketlegacy_MainActivity_nativeCricketPollHaptic(JNIEnv* env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    return mobile_input_poll_haptic_pulse() ? JNI_TRUE : JNI_FALSE;
+}
+
+// JNI Entry: Query average input latency in microseconds
+JNIEXPORT jlong JNICALL
+Java_org_cricketlegacy_MainActivity_nativeCricketGetInputLatencyUs(JNIEnv* env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    MobileInputTelemetry telem;
+    mobile_input_get_telemetry(&telem);
+    return (jlong)telem.input_latency_us;
+}
+
+// JNI Entry: Set current game context phase (Menu, Batting, Bowling, Fielding, Running)
+JNIEXPORT void JNICALL
+Java_org_cricketlegacy_MainActivity_nativeCricketSetGamePhase(JNIEnv* env, jclass clazz, jint phase) {
+    (void)env;
+    (void)clazz;
+    mobile_input_set_game_phase((GamePhase)phase);
 }

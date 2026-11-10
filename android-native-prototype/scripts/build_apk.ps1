@@ -17,8 +17,8 @@ Write-Host "==========================================================" -Foregro
 
 # 1. Compile Java source to bytecode
 Write-Host "[1/5] Compiling Java source with javac..." -ForegroundColor Green
-& javac -cp "$PLATFORM_JAR" -d "$APP_DIR\build\classes" `
-    "$SRC_DIR\java\org\cricketlegacy\MainActivity.java"
+$javaFiles = (Get-ChildItem -Path "$SRC_DIR\java\org\cricketlegacy" -Filter "*.java").FullName
+& javac -cp "$PLATFORM_JAR" -d "$APP_DIR\build\classes" $javaFiles
 
 # 2. Dex bytecode with d8
 Write-Host "[2/5] Converting classes to Dalvik Executable (classes.dex) with d8..." -ForegroundColor Green

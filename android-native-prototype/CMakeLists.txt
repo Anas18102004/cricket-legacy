@@ -40,6 +40,7 @@ add_library(cricket_recomp_objects OBJECT
 # Shared Library for Android App (JNI / Activity)
 add_library(cricket_native_harness SHARED
     src/main.c
+    src/mobile_input.c
     src/host_core.c
     "D:/cricket07-browser-src/host/kernel32.c"
     "D:/cricket07-browser-src/host/user32.c"
@@ -78,6 +79,7 @@ target_link_libraries(cricket_native_harness PRIVATE
 # Standalone Test Runner Executable
 add_executable(cricket_authentic_runner
     src/authentic_boot_runner.c
+    src/mobile_input.c
     src/host_core.c
     "D:/cricket07-browser-src/host/kernel32.c"
     "D:/cricket07-browser-src/host/user32.c"
