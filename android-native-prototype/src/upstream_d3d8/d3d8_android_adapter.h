@@ -38,6 +38,9 @@ void d3d8_android_shutdown(void);
 const D3D8AndroidState* d3d8_android_get_state(void);
 Device* d3d8_android_get_device(void);
 
+// Verifies COM vtable dispatch through guest memory and call_indirect
+bool d3d8_android_verify_com_dispatch(void);
+
 // C Wrappers directly invoking the original Direct3D 8 implementation
 uint32_t d3d8_CreateVertexBuffer(Device *d, uint32_t len, uint32_t usage, uint32_t fvf, uint32_t pool);
 uint32_t d3d8_CreateIndexBuffer(Device *d, uint32_t len, uint32_t usage, uint32_t fmt, uint32_t pool);

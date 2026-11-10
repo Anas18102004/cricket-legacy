@@ -116,7 +116,9 @@ Java_org_cricketlegacy_MainActivity_nativeCricketSetSurface(JNIEnv* env, jclass 
     // Phase C.1 Primary path: Direct3D 8 Engine Integration with WebGPU Backend
     LOGI("Initializing Direct3D 8 WebGPU Android Adapter...");
     if (d3d8_android_init(g_native_window)) {
-        LOGI("D3D8 Android Adapter initialized successfully! Initializing 3D validation scene...");
+        LOGI("D3D8 Android Adapter initialized successfully! Running Phase C.1.5 COM Dispatch Verification...");
+        d3d8_android_verify_com_dispatch();
+        LOGI("Initializing 3D validation scene...");
         if (test_d3d8_scene_init()) {
             LOGI("Phase C.1 Direct3D 8 3D Validation Scene initialized and ready to render!");
             return JNI_TRUE;

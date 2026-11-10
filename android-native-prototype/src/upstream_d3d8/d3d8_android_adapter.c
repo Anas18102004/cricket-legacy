@@ -2,6 +2,8 @@
 #include "render.h"
 #include "cpu.h"
 #include "win32.h"
+#include "com.h"
+#include "runtime.h"
 #include "../cricket_memory.h"
 #include <android/log.h>
 #include <string.h>
@@ -204,6 +206,76 @@ const D3D8AndroidState* d3d8_android_get_state(void) {
 
 Device* d3d8_android_get_device(void) {
     return s_adapter_state.device;
+}
+
+bool d3d8_android_verify_com_dispatch(void) {
+    if (!s_adapter_state.guest_device_obj) {
+        LOGE("verify_com_dispatch: guest_device_obj is NULL");
+        return false;
+    }
+    uint32_t g_dev = s_adapter_state.guest_device_obj;
+    ComObj *o = com_get(g_dev);
+    if (!o) {
+        LOGE("verify_com_dispatch: com_get(0x%08x) failed", g_dev);
+        return false;
+    }
+    LOGI("verify_com_dispatch: ComObj at 0x%08x, type %d, iface %s", g_dev, o->type, o->iface->name);
+
+    // 1. Read vtable pointer in guest memory
+    uint32_t vt = R32(g_dev);
+    LOGI("verify_com_dispatch: guest vtable at 0x%08x", vt);
+    if (!vt) {
+        LOGE("verify_com_dispatch: vtable is NULL");
+        return false;
+    }
+
+    // 2. Check Slot 34: BeginScene (nargs=0)
+    uint32_t magic_begin = R32(vt + 34 * 4);
+    const char *name_begin = import_name(magic_begin);
+    LOGI("verify_com_dispatch: Slot 34 (BeginScene) -> magic 0x%08x (%s)",
+         magic_begin, name_begin ? name_begin : "?");
+
+    // 3. Check Slot 71: DrawIndexedPrimitive (nargs=5)
+    uint32_t magic_draw = R32(vt + 71 * 4);
+    const char *name_draw = import_name(magic_draw);
+    LOGI("verify_com_dispatch: Slot 71 (DrawIndexedPrimitive) -> magic 0x%08x (%s)",
+         magic_draw, name_draw ? name_draw : "?");
+
+    // 4. Check Slot 35: EndScene (nargs=0)
+    uint32_t magic_end = R32(vt + 35 * 4);
+    const char *name_end = import_name(magic_end);
+    LOGI("verify_com_dispatch: Slot 35 (EndScene) -> magic 0x%08x (%s)",
+         magic_end, name_end ? name_end : "?");
+
+    if (magic_begin < IMPORT_BASE || magic_draw < IMPORT_BASE || magic_end < IMPORT_BASE) {
+        LOGE("verify_com_dispatch: vtable slots not in IMPORT_BASE range");
+        return false;
+    }
+
+    // 5. Test dispatch through call_indirect
+    CPU c = {0};
+    c.esp = SCRATCH_STACK;
+    W32(c.esp + 0, 0x00401000); // Return address
+    W32(c.esp + 4, g_dev);      // THIS
+    call_indirect(&c, magic_begin);
+    if (c.eax != S_OK) {
+        LOGE("verify_com_dispatch: call_indirect(BeginScene) returned 0x%08x", c.eax);
+        return false;
+    }
+    LOGI("verify_com_dispatch: call_indirect(BeginScene) SUCCEEDED (eax=0x%08x)", c.eax);
+
+    c.esp = SCRATCH_STACK;
+    W32(c.esp + 0, 0x00401000);
+    W32(c.esp + 4, g_dev);
+    call_indirect(&c, magic_end);
+    if (c.eax != S_OK) {
+        LOGE("verify_com_dispatch: call_indirect(EndScene) returned 0x%08x", c.eax);
+        return false;
+    }
+    LOGI("verify_com_dispatch: call_indirect(EndScene) SUCCEEDED (eax=0x%08x)", c.eax);
+
+    LOGI("verify_com_dispatch: COM dispatch verified end-to-end via call_indirect.");
+    return true;
 }
 
 // ============================================================================
@@ -428,11 +500,14 @@ void d3d8_Clear(Device *d, uint32_t count, uint32_t flags, uint32_t color, float
 
 void d3d8_BeginScene(Device *d) {
     (void)d;
+    uint32_t vt = R32(s_adapter_state.guest_device_obj);
+    uint32_t target = vt ? R32(vt + 34 * 4) : 0;
     CPU c = {0};
     c.esp = SCRATCH_STACK;
     W32(c.esp + 0, 0);
     W32(c.esp + 4, s_adapter_state.guest_device_obj);
-    dev_BeginScene(&c);
+    if (target) call_indirect(&c, target);
+    else dev_BeginScene(&c);
 }
 
 void d3d8_DrawPrimitive(Device *d, uint32_t prim, uint32_t start_vertex, uint32_t prim_count) {
@@ -450,6 +525,8 @@ void d3d8_DrawPrimitive(Device *d, uint32_t prim, uint32_t start_vertex, uint32_
 
 void d3d8_DrawIndexedPrimitive(Device *d, uint32_t prim, uint32_t min_idx, uint32_t num_verts, uint32_t start_idx, uint32_t prim_count) {
     (void)d;
+    uint32_t vt = R32(s_adapter_state.guest_device_obj);
+    uint32_t target = vt ? R32(vt + 71 * 4) : 0;
     CPU c = {0};
     c.esp = SCRATCH_STACK;
     W32(c.esp + 0, 0);
@@ -459,17 +536,21 @@ void d3d8_DrawIndexedPrimitive(Device *d, uint32_t prim, uint32_t min_idx, uint3
     W32(c.esp + 16, num_verts);
     W32(c.esp + 20, start_idx);
     W32(c.esp + 24, prim_count);
-    dev_DrawIndexedPrimitive(&c);
+    if (target) call_indirect(&c, target);
+    else dev_DrawIndexedPrimitive(&c);
     s_adapter_state.total_draws++;
 }
 
 void d3d8_EndScene(Device *d) {
     (void)d;
+    uint32_t vt = R32(s_adapter_state.guest_device_obj);
+    uint32_t target = vt ? R32(vt + 35 * 4) : 0;
     CPU c = {0};
     c.esp = SCRATCH_STACK;
     W32(c.esp + 0, 0);
     W32(c.esp + 4, s_adapter_state.guest_device_obj);
-    dev_EndScene(&c);
+    if (target) call_indirect(&c, target);
+    else dev_EndScene(&c);
 }
 
 void d3d8_Present(Device *d) {

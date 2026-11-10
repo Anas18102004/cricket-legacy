@@ -119,6 +119,19 @@ uint32_t add_dynamic_import(const char *name, GuestFn fn) {
     return IMPORT_BASE + idx * 16;
 }
 
+void call_indirect(CPU *c, uint32_t target) {
+    if (target >= IMPORT_BASE) {
+        uint32_t slot = (target - IMPORT_BASE) / 16;
+        if (slot < g_num_dyn_imports) {
+            g_import_target = target;
+            g_dyn_imports[slot].fn(c);
+            return;
+        }
+    }
+    fprintf(stderr, "call_indirect: unknown target 0x%08x (return address 0x%08x)\n", target, R32(c->esp));
+    guest_trap(c, target, "indirect call to unknown target");
+}
+
 const char *import_name(uint32_t addr) {
     if (addr < IMPORT_BASE || addr >= IMPORT_BASE + g_num_dyn_imports * 16) return NULL;
     return g_dyn_imports[(addr - IMPORT_BASE) / 16].name;
