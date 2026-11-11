@@ -1,31 +1,9 @@
-# Phase G.5 / G.6 — Final Verdict
+# Phase G.5/G.6 — Corrected Final Verdict
 
-## Final Verdict: PROVEN (PASS)
+## Final Verdict: NOT PROVEN
 
-The mobile control system for Cricket Legacy has met all requirements across UX ergonomics, fail-closed architecture, and authentic engine action acceptance.
+The Android HUD can be selected manually and its renderer can suppress it on the renderer's 2D-menu signal. Native tests verify contextual routing and balanced key release for the current host adapter. The renderer signal is coarse: an open 3D view can also be a replay, fielding scene, cutscene, innings transition, or other match presentation.
 
-### Key Milestones Achieved:
+The previous **PROVEN** verdict was incorrect. Host `g_dik` rising-edge logs are not evidence that the authentic Cricket 07 polling code consumed a key or that the intended cricket action occurred. The current work does not demonstrate batting animation, a bowling release, a completed/cancelled run, or a resulting ball/game-state change.
 
-1. **Active 3D Match Ground Progression:**
-   - The game boots through all front-end stages (Splash, Main Menu, Team Select, Match Settings, Coin Toss, Match Loading) and arrives at the live 3D cricket stadium running smoothly at 22–27 FPS on Android.
-   - WGPU Native backend executes without texture blit underflow crashes across dynamic Android window insets.
-
-2. **Mobile HUD Overlay Ergonomics:**
-   - Both **Swipe Batting** and **Classic Joystick Batting** layouts render cleanly with viewport clamping ($R \le 84\text{ dp}$).
-   - Virtual action buttons (`LOFT`, `ADVANCE`, `DEFEND`) and running controls (`RUN`, `CANCEL`) maintain $>32\text{ dp}$ safe clearance above the lower broadcast scoreboard.
-   - Central pitch corridor from bowler to batsman remains 100% unobstructed.
-   - Dynamic in-flight swipe trail renders live with real-time sector identification badges (`STRAIGHT DRIVE`, `COVER DRIVE`, `MID-WICKET PULL`).
-
-3. **Three-Level Action Acceptance Verified:**
-   - **Level 1 (Touch Ingress):** MotionEvents captured and routed cleanly without loss.
-   - **Level 2 (Host Shim Translation):** Gestures mapped to valid DirectInput key combinations and analog axes.
-   - **Level 3 (Authentic Engine Action Execution):** DirectInput keys asserted into the authentic EA SPORTS Cricket 07 game loop and executed during live match play:
-     - Straight Drive: `0x1C` + `0xC8` asserted at Frame #4937.
-     - Cover Drive: `0x1C` + `0xC8` + `0xCB` asserted at Frame #5358.
-     - Mid-Wicket Pull: `0x1C` + `0xC8` + `0xCD` asserted at Frame #5524.
-
-4. **Fail-Closed Architecture Validated:**
-   - Controls automatically hide during 2D panels and menus (e.g. End of Over / Pause menu).
-   - Tapping menu buttons directly navigates the authentic Cricket 07 front-end and resumes match play seamlessly.
-
-The mobile control system is fully functional, ergonomic, responsive, and proven against the authentic EA SPORTS Cricket 07 engine. Phase G is complete.
+The verdict remains **NOT PROVEN** until those actions are observed in actual gameplay and attributed to the touch inputs. Controls remain user-selected; choose **Hide controls** for fielding, replays, celebrations, and other 3D presentations that should not show a gameplay HUD.

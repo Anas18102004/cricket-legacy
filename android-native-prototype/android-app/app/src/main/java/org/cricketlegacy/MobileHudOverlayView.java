@@ -35,6 +35,8 @@ public class MobileHudOverlayView extends View {
     // Drawing Paints (pre-allocated to avoid GC churn during 60 FPS rendering)
     private final Paint mJoystickBasePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mJoystickKnobPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mJoystickKnobBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mJoystickDirectionPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mButtonBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mButtonPressedPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mButtonTogglePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -44,6 +46,7 @@ public class MobileHudOverlayView extends View {
     private final Paint mSwipeLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mBannerBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mBannerTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path mDirectionMarkerPath = new Path();
 
     // Joystick State
     private float mJoyBaseX, mJoyBaseY, mJoyRadius;
@@ -99,11 +102,17 @@ public class MobileHudOverlayView extends View {
         }
 
         // Low contrast idle controls preserve the original game's artwork.
-        mJoystickBasePaint.setColor(Color.argb(58, 12, 18, 24));
+        mJoystickBasePaint.setColor(Color.argb(105, 12, 18, 24));
         mJoystickBasePaint.setStyle(Paint.Style.FILL);
 
-        mJoystickKnobPaint.setColor(Color.argb(225, 226, 231, 234));
+        mJoystickKnobPaint.setColor(Color.argb(220, 176, 188, 193));
         mJoystickKnobPaint.setStyle(Paint.Style.FILL);
+
+        mJoystickKnobBorderPaint.setColor(Color.argb(185, 245, 241, 225));
+        mJoystickKnobBorderPaint.setStyle(Paint.Style.STROKE);
+        mJoystickKnobBorderPaint.setStrokeWidth(1.5f * mDensity);
+        mJoystickDirectionPaint.setColor(Color.argb(178, 245, 241, 225));
+        mJoystickDirectionPaint.setStyle(Paint.Style.FILL);
 
         // Buttons
         mButtonBgPaint.setColor(Color.argb(112, 13, 20, 27));
@@ -204,7 +213,7 @@ public class MobileHudOverlayView extends View {
     private boolean isButtonVisible(HudButton button) {
         if (mGameplayContext == 1 || mGameplayContext == 2 || mGameplayContext == 5)
             return button.id >= 1 && button.id <= 3;
-        if (mGameplayContext == 3) return button.id >= 6 && button.id <= 9;
+        if (mGameplayContext == 3) return button.id >= 6 && button.id <= 10;
         if (mGameplayContext == 4) return button.id == 4 || button.id == 5;
         return false;
     }
@@ -246,19 +255,19 @@ public class MobileHudOverlayView extends View {
         // substantial while clamping it to the rendered viewport on compact screens.
         mJoyRadius = Math.min(84.0f * mDensity, shortSide * 0.16f);
         mJoyKnobRadius = mJoyRadius * 0.34f;
-        float joyInset = Math.max(mViewportWidth * 0.15f, mJoyRadius + margin);
+        float joyInset = Math.max(mViewportWidth * 0.21f, mJoyRadius + margin);
         mJoyBaseX = mLeftHanded ? mViewportLeft + mViewportWidth - joyInset : mViewportLeft + joyInset;
-        mJoyBaseY = mViewportTop + mViewportHeight * 0.62f;
+        mJoyBaseY = mViewportTop + mViewportHeight * 0.64f;
         mJoyKnobX = mJoyBaseX;
         mJoyKnobY = mJoyBaseY;
 
         mButtons.clear();
-        float btnSz = Math.min(56.0f * mDensity, shortSide * 0.13f);
-        btnSz = Math.max(Math.min(48.0f * mDensity, shortSide * 0.12f), btnSz);
+        float btnSz = Math.min(56.0f * mDensity, shortSide * 0.19f);
+        btnSz = Math.max(Math.min(48.0f * mDensity, shortSide * 0.22f), btnSz);
         float gap = 12.0f * mDensity;
-        float clusterWidth = btnSz * 2 + gap;
-        float clusterX = mLeftHanded ? mViewportLeft + margin
-                : mViewportLeft + mViewportWidth - margin - clusterWidth;
+        float clusterWidth = btnSz * 3 + gap * 2;
+        float clusterX = mLeftHanded ? mViewportLeft + margin + mViewportWidth * 0.06f
+                : mViewportLeft + mViewportWidth - margin - clusterWidth - mViewportWidth * 0.06f;
         // Keep the two-row action group above the original lower broadcast ticker.
         float upperY = mViewportTop + mViewportHeight * 0.48f;
         float lowerY = upperY + btnSz + gap;
@@ -266,30 +275,29 @@ public class MobileHudOverlayView extends View {
         // Button 1: LOFT (Toggle)
         HudButton loftBtn = new HudButton();
         loftBtn.id = 1;
-        loftBtn.label = "LOFT";
+        loftBtn.label = "SHIFT";
         loftBtn.isToggle = true;
-        loftBtn.rect.set(clusterX, upperY, clusterX + btnSz, upperY + btnSz);
+        loftBtn.rect.set(clusterX + btnSz + gap, upperY, clusterX + btnSz * 2 + gap, upperY + btnSz);
         mButtons.add(loftBtn);
 
         // Button 2: ADVANCE
         HudButton advBtn = new HudButton();
         advBtn.id = 2;
-        advBtn.label = "ADVANCE";
-        advBtn.rect.set(clusterX + btnSz + gap, upperY, clusterX + btnSz * 2 + gap, upperY + btnSz);
+        advBtn.label = "D";
+        advBtn.rect.set(clusterX + btnSz * 2 + gap * 2, upperY, clusterX + btnSz * 3 + gap * 2, upperY + btnSz);
         mButtons.add(advBtn);
 
         // Button 3: DEFEND
         HudButton defBtn = new HudButton();
         defBtn.id = 3;
-        defBtn.label = "DEFEND";
-        defBtn.rect.set(clusterX + (btnSz + gap) * 0.5f, lowerY,
-                clusterX + (btnSz + gap) * 0.5f + btnSz, lowerY + btnSz);
+        defBtn.label = "S";
+        defBtn.rect.set(clusterX + btnSz + gap, lowerY, clusterX + btnSz * 2 + gap, lowerY + btnSz);
         mButtons.add(defBtn);
 
         // Button 4: RUN
         HudButton runBtn = new HudButton();
         runBtn.id = 4;
-        runBtn.label = "RUN";
+        runBtn.label = "RUN D";
         float runSize = Math.min(78.0f * mDensity,
                 Math.max(48.0f * mDensity, mViewportHeight * 0.12f));
         float runY = mViewportTop + mViewportHeight * 0.64f;
@@ -301,45 +309,53 @@ public class MobileHudOverlayView extends View {
         // Button 5: CANCEL RUN
         HudButton cancelBtn = new HudButton();
         cancelBtn.id = 5;
-        cancelBtn.label = "CANCEL";
+        cancelBtn.label = "CANCEL A";
         cancelBtn.rect.set(runX + runSize + gap, runY, runX + runSize * 2 + gap, runY + runSize);
         mButtons.add(cancelBtn);
 
         HudButton standardBtn = new HudButton();
         standardBtn.id = 6;
-        standardBtn.label = "STANDARD";
+        standardBtn.label = "S";
         standardBtn.rect.set(clusterX, upperY, clusterX + btnSz, upperY + btnSz);
         mButtons.add(standardBtn);
 
         HudButton swingBtn = new HudButton();
         swingBtn.id = 7;
-        swingBtn.label = "SWING";
+        swingBtn.label = "A";
         swingBtn.rect.set(clusterX + btnSz + gap, upperY,
                 clusterX + btnSz * 2 + gap, upperY + btnSz);
         mButtons.add(swingBtn);
 
         HudButton cutBtn = new HudButton();
         cutBtn.id = 8;
-        cutBtn.label = "CUT";
-        cutBtn.rect.set(clusterX, lowerY, clusterX + btnSz, lowerY + btnSz);
+        cutBtn.label = "D";
+        cutBtn.rect.set(clusterX + btnSz * 2 + gap * 2, upperY,
+                clusterX + btnSz * 3 + gap * 2, upperY + btnSz);
         mButtons.add(cutBtn);
 
         HudButton bouncerBtn = new HudButton();
         bouncerBtn.id = 9;
-        bouncerBtn.label = "BOUNCER";
+        bouncerBtn.label = "SHIFT";
         bouncerBtn.rect.set(clusterX + btnSz + gap, lowerY,
                 clusterX + btnSz * 2 + gap, lowerY + btnSz);
         mButtons.add(bouncerBtn);
+
+        HudButton altBtn = new HudButton();
+        altBtn.id = 10;
+        altBtn.label = "ALT";
+        altBtn.rect.set(clusterX + btnSz * 2 + gap * 2, lowerY,
+                clusterX + btnSz * 3 + gap * 2, lowerY + btnSz);
+        mButtons.add(altBtn);
         dispatchNativeLayout();
     }
 
     public void dispatchNativeLayout() {
-        if (mListener == null || mViewportWidth <= 0 || mViewportHeight <= 0 || mButtons.size() < 9) return;
-        float[] layout = new float[39];
+        if (mListener == null || mViewportWidth <= 0 || mViewportHeight <= 0 || mButtons.size() < 10) return;
+        float[] layout = new float[43];
         layout[0] = mJoyBaseX;
         layout[1] = mJoyBaseY;
         layout[2] = mJoyRadius;
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 10; i++) {
             HudButton button = mButtons.get(i);
             int offset = 3 + i * 4;
             layout[offset] = button.rect.left;
@@ -400,7 +416,8 @@ public class MobileHudOverlayView extends View {
 
                 // Check Joystick zone
                 if (track.targetButton == null &&
-                    (mGameplayContext == 1 || mGameplayContext == 2) && mBattingMode == 1) {
+                    (((mGameplayContext == 1 || mGameplayContext == 2) && mBattingMode == 1) ||
+                     mGameplayContext == 3)) {
                     float jdx = px - mJoyBaseX;
                     float jdy = py - mJoyBaseY;
                     float dist = (float) Math.sqrt(jdx * jdx + jdy * jdy);
@@ -553,6 +570,27 @@ public class MobileHudOverlayView extends View {
         return null;
     }
 
+    private void drawDirectionMarker(Canvas canvas, float cx, float cy, float size, int direction) {
+        float tipX = cx, tipY = cy;
+        float baseX = cx, baseY = cy;
+        if (direction == 0) { tipY -= size; baseY += size * 0.65f; }
+        else if (direction == 1) { tipX += size; baseX -= size * 0.65f; }
+        else if (direction == 2) { tipY += size; baseY -= size * 0.65f; }
+        else { tipX -= size; baseX += size * 0.65f; }
+        float side = size * 0.72f;
+        mDirectionMarkerPath.reset();
+        mDirectionMarkerPath.moveTo(tipX, tipY);
+        if (direction == 0 || direction == 2) {
+            mDirectionMarkerPath.lineTo(baseX + side, baseY);
+            mDirectionMarkerPath.lineTo(baseX - side, baseY);
+        } else {
+            mDirectionMarkerPath.lineTo(baseX, baseY + side);
+            mDirectionMarkerPath.lineTo(baseX, baseY - side);
+        }
+        mDirectionMarkerPath.close();
+        canvas.drawPath(mDirectionMarkerPath, mJoystickDirectionPaint);
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
@@ -560,13 +598,21 @@ public class MobileHudOverlayView extends View {
         long now = System.currentTimeMillis();
 
         // 1. Draw Joystick if Batting Mode is not Pure Swipe
-        if ((mGameplayContext == 1 || mGameplayContext == 2 || mGameplayContext == 5) && mBattingMode == 1) {
+        if (((mGameplayContext == 1 || mGameplayContext == 2 || mGameplayContext == 5) && mBattingMode == 1) ||
+                mGameplayContext == 3) {
             canvas.drawCircle(mJoyBaseX, mJoyBaseY, mJoyRadius, mJoystickBasePaint);
             canvas.drawCircle(mJoyBaseX, mJoyBaseY, mJoyRadius, mButtonBorderPaint);
             mButtonBorderPaint.setAlpha(55);
             canvas.drawCircle(mJoyBaseX, mJoyBaseY, mJoyRadius * mDeadzone, mButtonBorderPaint);
             mButtonBorderPaint.setAlpha(132);
+            float arrowOffset = mJoyRadius * 0.72f;
+            float arrowSize = Math.max(5.0f * mDensity, mJoyRadius * 0.11f);
+            drawDirectionMarker(canvas, mJoyBaseX, mJoyBaseY - arrowOffset, arrowSize, 0);
+            drawDirectionMarker(canvas, mJoyBaseX + arrowOffset, mJoyBaseY, arrowSize, 1);
+            drawDirectionMarker(canvas, mJoyBaseX, mJoyBaseY + arrowOffset, arrowSize, 2);
+            drawDirectionMarker(canvas, mJoyBaseX - arrowOffset, mJoyBaseY, arrowSize, 3);
             canvas.drawCircle(mJoyKnobX, mJoyKnobY, mJoyKnobRadius, mJoystickKnobPaint);
+            canvas.drawCircle(mJoyKnobX, mJoyKnobY, mJoyKnobRadius, mJoystickKnobBorderPaint);
         }
 
         // 2. Draw Virtual Action Buttons
@@ -574,12 +620,12 @@ public class MobileHudOverlayView extends View {
             if (!isButtonVisible(btn)) continue;
             Paint bg = btn.isPressed ? mButtonPressedPaint :
                        (btn.isToggle && btn.toggleState ? mButtonTogglePaint : mButtonBgPaint);
-            float corner = Math.min(btn.rect.width(), btn.rect.height()) * 0.30f;
-            canvas.drawRoundRect(btn.rect, corner, corner, bg);
-            canvas.drawRoundRect(btn.rect, corner, corner, mButtonBorderPaint);
+            float buttonRadius = Math.min(btn.rect.width(), btn.rect.height()) * 0.5f;
+            canvas.drawCircle(btn.rect.centerX(), btn.rect.centerY(), buttonRadius, bg);
+            canvas.drawCircle(btn.rect.centerX(), btn.rect.centerY(), buttonRadius, mButtonBorderPaint);
 
             float labelSizeDp = btn.label.length() >= 7 ? 10.0f :
-                    (btn.label.length() >= 6 ? 10.8f : 12.0f);
+                    (btn.label.length() >= 6 ? 10.8f : 14.0f);
             mButtonTextPaint.setTextSize(labelSizeDp * mDensity);
             float textY = btn.rect.centerY() - ((mButtonTextPaint.descent() + mButtonTextPaint.ascent()) / 2);
             canvas.drawText(btn.label, btn.rect.centerX(), textY, mButtonTextPaint);

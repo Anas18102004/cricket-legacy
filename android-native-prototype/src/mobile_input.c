@@ -32,6 +32,7 @@ extern void input_tap_release(void);
 #define DIK_SPACE           0x39
 #define DIK_LCONTROL        0x1D
 #define DIK_LSHIFT          0x2A
+#define DIK_LMENU           0x38
 #define DIK_UP              0xC8
 #define DIK_DOWN            0xD0
 #define DIK_LEFT            0xCB
@@ -50,6 +51,8 @@ static TouchPointerState s_pointers[MOBILE_INPUT_MAX_POINTERS];
 static VirtualJoystickState s_joystick;
 static VirtualButtonState s_buttons[16];
 static int s_button_count = 0;
+static const uint8_t s_arrow_dik[4] = {DIK_UP, DIK_DOWN, DIK_LEFT, DIK_RIGHT};
+static bool s_arrow_down[4];
 
 static SwipeStrokeEvent s_last_stroke;
 static bool s_haptic_pulse_pending = false;
@@ -72,6 +75,13 @@ static uint64_t get_time_us(void) {
 
 static uint64_t get_time_ms(void) {
     return get_time_us() / 1000ULL;
+}
+
+static void release_joystick_keys(void) {
+    for (int i = 0; i < 4; i++) {
+        if (s_arrow_down[i]) input_key_dik(s_arrow_dik[i], 0);
+        s_arrow_down[i] = false;
+    }
 }
 
 // Layout configuration based on screen dimensions and left-handed preference
@@ -110,7 +120,7 @@ static void update_hud_layout(void) {
     // Button: Loft Toggle
     s_buttons[s_button_count++] = (VirtualButtonState){
         .id = BTN_LOFT_TOGGLE,
-        .label = "LOFT",
+        .label = "SHIFT",
         .x = cluster_x,
         .y = cluster_y - btn_sz - gap,
         .w = btn_sz,
@@ -124,29 +134,29 @@ static void update_hud_layout(void) {
 
     // Button: Advance Down Pitch
     s_buttons[s_button_count++] = (VirtualButtonState){
-        .id = BTN_ADVANCE,
-        .label = "ADVANCE",
+        .id = BTN_ADVANCED_SHOT,
+        .label = "D",
         .x = cluster_x + btn_sz + gap,
         .y = cluster_y - btn_sz - gap,
         .w = btn_sz,
         .h = btn_sz,
         .is_pressed = false,
         .is_toggle = false,
-        .dik_binding = DIK_LCONTROL,
+        .dik_binding = DIK_D,
         .pad_binding = (1u << 5) // RB / R1
     };
 
     // Button: Defend
     s_buttons[s_button_count++] = (VirtualButtonState){
-        .id = BTN_DEFEND,
-        .label = "DEFEND",
+        .id = BTN_NORMAL_SHOT,
+        .label = "S",
         .x = cluster_x - btn_sz - gap,
         .y = cluster_y,
         .w = btn_sz,
         .h = btn_sz,
         .is_pressed = false,
         .is_toggle = false,
-        .dik_binding = DIK_RETURN,
+        .dik_binding = DIK_S,
         .pad_binding = (1u << 3) // Triangle / Y
     };
 
@@ -174,14 +184,14 @@ static void update_hud_layout(void) {
         .h = btn_sz,
         .is_pressed = false,
         .is_toggle = false,
-        .dik_binding = DIK_S,
+        .dik_binding = DIK_A,
         .pad_binding = (1u << 1) // Button B
     };
 
     // Bowling Buttons (Cluster in bottom right / center)
     s_buttons[s_button_count++] = (VirtualButtonState){
         .id = BTN_BOWL_STANDARD,
-        .label = "STANDARD (S)",
+        .label = "S",
         .x = cluster_x - btn_sz - gap,
         .y = cluster_y - btn_sz - gap,
         .w = btn_sz,
@@ -193,7 +203,7 @@ static void update_hud_layout(void) {
 
     s_buttons[s_button_count++] = (VirtualButtonState){
         .id = BTN_BOWL_SWING,
-        .label = "SWING (A)",
+        .label = "A",
         .x = cluster_x,
         .y = cluster_y - btn_sz - gap,
         .w = btn_sz,
@@ -205,7 +215,7 @@ static void update_hud_layout(void) {
 
     s_buttons[s_button_count++] = (VirtualButtonState){
         .id = BTN_BOWL_CUT,
-        .label = "CUT (D)",
+        .label = "D",
         .x = cluster_x + btn_sz + gap,
         .y = cluster_y - btn_sz - gap,
         .w = btn_sz,
@@ -216,15 +226,27 @@ static void update_hud_layout(void) {
     };
 
     s_buttons[s_button_count++] = (VirtualButtonState){
-        .id = BTN_BOWL_BOUNCER,
-        .label = "BOUNCER (W)",
+        .id = BTN_BOWL_SHIFT,
+        .label = "SHIFT",
         .x = cluster_x,
         .y = cluster_y,
         .w = btn_sz,
         .h = btn_sz,
         .is_pressed = false,
-        .dik_binding = DIK_W,
+        .dik_binding = DIK_LSHIFT,
         .pad_binding = (1u << 3)
+    };
+
+    s_buttons[s_button_count++] = (VirtualButtonState){
+        .id = BTN_BOWL_ALT,
+        .label = "ALT",
+        .x = cluster_x + btn_sz + gap,
+        .y = cluster_y,
+        .w = btn_sz,
+        .h = btn_sz,
+        .is_pressed = false,
+        .dik_binding = DIK_LMENU,
+        .pad_binding = (1u << 5)
     };
 
     LOGI("HUD layout updated: screen=%dx%d left_handed=%d button_count=%d",
@@ -271,6 +293,7 @@ void mobile_input_set_hud_layout(float joystick_x, float joystick_y, float joyst
                                   const float *button_rects, int button_count) {
     if (!button_rects || button_count <= 0) return;
     pthread_mutex_lock(&s_input_lock);
+    release_joystick_keys();
     for (int i = 0; i < s_active_stroke_key_count; i++)
         input_key_dik(s_active_stroke_keys[i], 0);
     s_active_stroke_key_count = 0;
@@ -311,6 +334,7 @@ void mobile_input_set_game_phase(GamePhase phase) {
     }
     s_active_stroke_key_count = 0;
     s_stroke_key_hold_frames = 0;
+    release_joystick_keys();
     for (int b = 0; b < s_button_count; b++) {
         VirtualButtonState *btn = &s_buttons[b];
         if (btn->is_pressed || btn->toggle_state) input_key_dik(btn->dik_binding, 0);
@@ -400,14 +424,35 @@ static void update_joystick_axis(float x, float y) {
         s_joystick.axis_x = (int32_t)(s_joystick.norm_x * 32767.0f);
         s_joystick.axis_y = (int32_t)(s_joystick.norm_y * 32767.0f);
     }
-    input_gamepad(0, 1, 0, s_joystick.axis_x, s_joystick.axis_y, 0, 0);
+    // The reference touch control emits keyboard arrows, including diagonals.
+    bool want[4] = {false, false, false, false};
+    if (dist >= dead_px && dist > 0.0f) {
+        int sector = (int)lroundf(atan2f(jdy, jdx) / ((float)M_PI / 4.0f));
+        sector = (sector % 8 + 8) % 8; /* right, down-right, down, ... */
+        switch (sector) {
+            case 0: want[3] = true; break;
+            case 1: want[1] = want[3] = true; break;
+            case 2: want[1] = true; break;
+            case 3: want[1] = want[2] = true; break;
+            case 4: want[2] = true; break;
+            case 5: want[0] = want[2] = true; break;
+            case 6: want[0] = true; break;
+            case 7: want[0] = want[3] = true; break;
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        if (want[i] != s_arrow_down[i]) {
+            input_key_dik(s_arrow_dik[i], want[i] ? 1 : 0);
+            s_arrow_down[i] = want[i];
+        }
+    }
 }
 
 static bool button_allowed_in_context(GamePhase phase, VirtualButtonId id) {
     if (phase == GAME_PHASE_BATTING || phase == GAME_PHASE_BALL_DEAD)
-        return id == BTN_LOFT_TOGGLE || id == BTN_ADVANCE || id == BTN_DEFEND;
+        return id == BTN_LOFT_TOGGLE || id == BTN_ADVANCED_SHOT || id == BTN_NORMAL_SHOT;
     if (phase == GAME_PHASE_BOWLING)
-        return id >= BTN_BOWL_STANDARD && id <= BTN_BOWL_BOUNCER;
+        return id >= BTN_BOWL_STANDARD && id <= BTN_BOWL_ALT;
     if (phase == GAME_PHASE_RUNNING)
         return id == BTN_RUN || id == BTN_CANCEL_RUN;
     return false;
@@ -435,10 +480,10 @@ static void map_sector_to_dik(ShotSector sector, uint8_t *out_keys, int *out_cou
         out_keys[(*out_count)++] = DIK_DOWN;
         break;
     case SECTOR_SQUARE_LEG:
+        out_keys[(*out_count)++] = DIK_DOWN;
         out_keys[(*out_count)++] = DIK_RIGHT;
         break;
     case SECTOR_MID_WICKET:
-        out_keys[(*out_count)++] = DIK_UP;
         out_keys[(*out_count)++] = DIK_RIGHT;
         break;
     case SECTOR_MID_ON:
@@ -468,19 +513,13 @@ static void dispatch_batting_stroke(SwipeStrokeEvent stroke) {
         s_active_stroke_keys[s_active_stroke_key_count++] = DIK_LSHIFT;
     }
 
-    // Apply Primary Stroke Trigger (Enter)
-    input_key_dik(DIK_RETURN, 1);
-    s_active_stroke_keys[s_active_stroke_key_count++] = DIK_RETURN;
+    // The browser control path uses S as the normal shot key. Direction and
+    // optional loft are held alongside it; host assertion is not action proof.
+    input_key_dik(DIK_S, 1);
+    s_active_stroke_keys[s_active_stroke_key_count++] = DIK_S;
 
-    // Also inject into Gamepad stick and Button A
-    float angle_rad = stroke.angle_deg * ((float)M_PI / 180.0f);
-    int32_t stick_x = (int32_t)(cosf(angle_rad) * 32767.0f);
-    int32_t stick_y = (int32_t)(-sinf(angle_rad) * 32767.0f);
-    uint32_t pad_btn = (1u << 0); // Button A
-    if (stroke.is_lofted) pad_btn |= (1u << 4); // LB
-    input_gamepad(0, 1, pad_btn, stick_x, stick_y, 0, 0);
-
-    // Hold for 6 engine frames (~100 ms at 60 FPS) to guarantee sampling by Cricket 07
+    // Six host adapter callbacks keep this synthetic swipe pulse bounded. This
+    // duration does not guarantee a sample by the original game thread.
     s_stroke_key_hold_frames = 6;
     s_haptic_pulse_pending = true;
 
@@ -503,6 +542,7 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
 
     int masked_action = action & 0xFF; // MotionEvent.ACTION_MASK
     if (masked_action == 3 /* ACTION_CANCEL */) {
+        release_joystick_keys();
         for (int b = 0; b < s_button_count; b++) {
             VirtualButtonState *btn = &s_buttons[b];
             if (btn->is_pressed || btn->toggle_state) input_key_dik(btn->dik_binding, 0);
@@ -577,9 +617,9 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
                 float jdx = x - s_joystick.center_x;
                 float jdy = y - s_joystick.center_y;
                 float jdist = sqrtf(jdx * jdx + jdy * jdy);
-                bool joystick_context = (s_current_phase == GAME_PHASE_BATTING ||
-                    s_current_phase == GAME_PHASE_BALL_DEAD) &&
-                    s_config.batting_mode == BATTING_MODE_CLASSIC_JOYSTICK;
+    bool joystick_context = (s_current_phase == GAME_PHASE_BOWLING) ||
+        ((s_current_phase == GAME_PHASE_BATTING || s_current_phase == GAME_PHASE_BALL_DEAD) &&
+         s_config.batting_mode == BATTING_MODE_CLASSIC_JOYSTICK);
                 if (joystick_context && jdist <= s_joystick.radius * 1.5f) {
                     ptr->owner = OWNER_JOYSTICK;
                     s_joystick.is_active = true;
@@ -647,8 +687,8 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
                         .is_lofted = false,
                         .is_defensive = true
                     };
-                    input_key_dik(DIK_RETURN, 1);
-                    s_active_stroke_keys[0] = DIK_RETURN;
+                    input_key_dik(DIK_S, 1);
+                    s_active_stroke_keys[0] = DIK_S;
                     s_active_stroke_key_count = 1;
                     s_stroke_key_hold_frames = 6;
                     s_haptic_pulse_pending = true;
@@ -656,6 +696,7 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
                     LOGI("[Defense Block Dispatched]");
                 }
             } else if (ptr->owner == OWNER_JOYSTICK) {
+                release_joystick_keys();
                 s_joystick.is_active = false;
                 s_joystick.norm_x = s_joystick.norm_y = 0.0f;
                 s_joystick.axis_x = s_joystick.axis_y = 0;
@@ -685,7 +726,7 @@ void mobile_input_on_touch(int action, float x, float y, int pointer_id) {
     pthread_mutex_unlock(&s_input_lock);
 }
 
-// Engine Frame Tick (called once per frame from render loop)
+// Host adapter tick (called from the Android render callback, not an engine poll).
 void mobile_input_frame_tick(void) {
     pthread_mutex_lock(&s_input_lock);
     s_frame_counter++;
@@ -739,6 +780,7 @@ bool mobile_input_poll_haptic_pulse(void) {
 
 void mobile_input_test_reset(void) {
     pthread_mutex_lock(&s_input_lock);
+    release_joystick_keys();
     memset(s_pointers, 0, sizeof(s_pointers));
     s_joystick.is_active = false;
     s_joystick.norm_x = s_joystick.norm_y = 0.0f;

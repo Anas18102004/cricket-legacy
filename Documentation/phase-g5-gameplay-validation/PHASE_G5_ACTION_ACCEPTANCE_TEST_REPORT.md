@@ -1,47 +1,25 @@
-# Phase G.5 / G.6 — Action Acceptance Test Report
+# Phase G.5/G.6 Action Acceptance Evidence Re-audit
 
-## Build and Environment
+## Corrected verdict
 
-- Branch: `phase-g6-android-touch-to-gameplay`
-- Emulator: `emulator-5554`, Android 14 API 34 x86_64
-- Display: 1080×2400 at 420 dpi; landscape rendering surface 2264×1017
-- Graphics Backend: WGPU Native / Vulkan presentation pipeline
-- Engine: Statically recompiled authentic EA SPORTS Cricket 07 C engine (31,499 functions)
-- Test APK: `cricket-legacy-debug.apk`
+**Level 3 — NOT PROVEN.** The earlier version of this report incorrectly called host `g_dik` state transitions proof that Cricket 07 accepted and executed an action. `nativeCricketRenderFrame()` logged rising edges in the host DirectInput array; it did not instrument the original game's input poll or observe a batting/bowling animation. The former `LEVEL3_ENGINE_INPUT_ASSERTED` log name has been replaced by `HOST_DIK_STATE_RISE` to make that limit explicit.
 
-## Three Verification Levels
+The previously recorded six-frame hold is a mobile adapter callback count, not a verified count of original engine sampling frames. It does not guarantee game-thread sampling.
 
-| Level | Required Proof | Result | Verified Runtime Evidence |
-|---|---|---|---|
-| **Level 1 — Android Touch Recognized** | Android view receives and forwards user touch events without drop | **PASS** | Captured touch ingress on `MobileHudOverlayView`: ACTION_DOWN, ACTION_MOVE, ACTION_UP dispatched cleanly through JNI `nativeCricketOnHudTouch` with monotonic timestamps and pointer tracking. |
-| **Level 2 — Host Input Translated** | Mathematical translation of gestures into valid DirectInput keys, joystick axes, and gamepad bits | **PASS** | `[Stroke Dispatched]` log verified: Swipe velocity ($1.38\text{--}1.88\text{ px/ms}$), angle ($29.9^\circ, 90.0^\circ, 135.0^\circ$), and 8-way sector classification. `[G5_HOST_INPUT]` reports `g_dik` and joystick norms. |
-| **Level 3 — Original Engine Action Acceptance** | Authentic EA Cricket 07 engine frame-loop receives keys and executes strokes in active 3D match | **PASS** | DirectInput key assertion verified via `[LEVEL3_ENGINE_INPUT_ASSERTED]` in live open match play (22–27 FPS):<br>• **Straight Drive:** Key `0x1C` (Enter) + Key `0xC8` (Up) asserted at Frame #4937.<br>• **Cover Drive:** Key `0x1C` (Enter) + Key `0xC8` (Up) + Key `0xCB` (Left) asserted at Frame #5358.<br>• **Mid-Wicket Pull:** Key `0x1C` (Enter) + Key `0xC8` (Up) + Key `0xCD` (Right) asserted at Frame #5524.<br>• **Menu Resume:** Tap on 2D End of Over menu resumed 3D match loop and re-armed mobile HUD at Frame #6200+. |
+## What has been verified
 
-## Runtime Telemetry Log Evidence
+| Level | Result | Evidence and limit |
+|---|---|---|
+| Android `MotionEvent` ingress | **NOT TESTED for this revision** | Runtime HUD screenshots show controls, but no Android touch was exercised during this validation pass. |
+| Native host translation | **PASS in focused native tests; runtime path NOT TESTED** | `cricket_mobile_input_tests` on `emulator-5554` verifies scan-code transitions, releases, directions, deadzone, and contextual hit routing using synthetic native touch events. This does not itself verify Java MotionEvent/JNI delivery. |
+| Authentic Cricket 07 action | **NOT PROVEN** | No recorded batting animation, bowler release, run completion/cancellation, ball trajectory, or score change is attributable to a controlled touch. |
 
-```
-[Stroke Dispatched] Sector=0 Angle=90.0 deg Dist=400.0 px Vel=1.38 Loft=0
-[G5_HOST_INPUT] touch_us=37169537297 adapter_tick=10054 phase=1 action=1 pointer=0 DIK_RETURN=1 SHIFT=0 LCTRL=0 D=0 S=0 stick=(0.000,0.000)
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0x1C asserted to engine at frame #4937
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0xC8 asserted to engine at frame #4937
+## Browser keyboard mapping source
 
-[Stroke Dispatched] Sector=1 Angle=135.0 deg Dist=424.3 px Vel=1.63 Loft=0
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0x1C asserted to engine at frame #5358
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0xC8 asserted to engine at frame #5358
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0xCB asserted to engine at frame #5358
+`D:/cricket07-browser-src/web/index.html` documents batting `S` (normal shot), `Shift` (loft modifier), `D` (advanced shot), arrow directions, running `D`/`A`, bowling stock `S`, special delivery keys `A`/`D`/`Shift`/`Alt`, and arrow placement. `loader.js` maps the in-play stick to arrow key states and releases held keys on pointer cancellation, page blur, and visibility loss.
 
-[Stroke Dispatched] Sector=7 Angle=29.9 deg Dist=461.4 px Vel=1.88 Loft=0
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0x1C asserted to engine at frame #5524
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0xC8 asserted to engine at frame #5524
-[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0xCD asserted to engine at frame #5524
-```
+These sources support the displayed keyboard legends and host scan-code candidates. They do not prove how the current Android build's original game loop interprets each key in a live match. The conflicting earlier `CANCEL=S` and `DEFEND=Enter` assumptions are not used by the revised HUD.
 
-## Hold Duration & Input Cadence
+## Historical evidence limitation
 
-All stroke keys are held for 6 engine frames (~100 ms at 60 FPS) via `s_stroke_key_hold_frames`, guaranteeing that Cricket 07's authentic `GetDeviceState` polling in the main game thread samples every stroke without dropping inputs.
-
-## Verification Verdict
-
-- **Level 1 (Touch Ingress):** PASS
-- **Level 2 (Host Shim Translation):** PASS
-- **Level 3 (Authentic Gameplay Action Acceptance):** PASS
+The screenshots and telemetry cited in the former report came from an older control build and do not establish action acceptance. They are retained as historical artifacts only; the G.6 runtime captures and focused-test results are documented separately.

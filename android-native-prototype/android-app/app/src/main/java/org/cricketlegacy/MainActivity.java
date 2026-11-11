@@ -233,10 +233,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Vi
     private void refreshHudVisibility() {
         if (mHudOverlay == null) return;
         int renderContext = nativeCricketGetRenderContext();
-        if (renderContext == 0 && mSelectedHudContext == HUD_OFF) {
-            // Auto-arm player's saved batting preference when entering open match play
-            mSelectedHudContext = (mBattingMode == 1) ? HUD_BATTING_CLASSIC : HUD_BATTING_SWIPE;
-        }
+        // Open 3D rendering is not a gameplay-state signal. Context stays hidden
+        // until the player explicitly selects it from the Android context menu.
         boolean requested = mSelectedHudContext >= HUD_BATTING_SWIPE &&
             mSelectedHudContext <= HUD_BALL_DEAD;
         boolean shouldShow = requested && renderContext == 0;

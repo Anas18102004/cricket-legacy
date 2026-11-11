@@ -55,17 +55,18 @@ typedef enum {
 typedef enum {
     BTN_NONE = 0,
     BTN_LOFT_TOGGLE = 1,
-    BTN_ADVANCE = 2,
-    BTN_DEFEND = 3,
+    BTN_ADVANCED_SHOT = 2,
+    BTN_NORMAL_SHOT = 3,
     BTN_RUN = 4,
     BTN_CANCEL_RUN = 5,
     BTN_BOWL_STANDARD = 6,  // 'S'
     BTN_BOWL_SWING = 7,     // 'A'
     BTN_BOWL_CUT = 8,       // 'D'
-    BTN_BOWL_BOUNCER = 9,   // 'W'
-    BTN_THROW_KEEPER = 10,
-    BTN_THROW_BOWLER = 11,
-    BTN_DIVE = 12
+    BTN_BOWL_SHIFT = 9,     // Shift modifier
+    BTN_BOWL_ALT = 10,      // Alt modifier
+    BTN_THROW_KEEPER = 11,
+    BTN_THROW_BOWLER = 12,
+    BTN_DIVE = 13
 } VirtualButtonId;
 
 // Directional Shot Sectors (8 compass sectors)

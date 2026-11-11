@@ -417,10 +417,10 @@ JNIEXPORT void JNICALL
 Java_org_cricketlegacy_MainActivity_nativeCricketSetHudLayout(JNIEnv* env, jclass clazz,
                                                               jfloatArray layout) {
     (void)clazz;
-    if (!layout || (*env)->GetArrayLength(env, layout) < 39) return;
+    if (!layout || (*env)->GetArrayLength(env, layout) < 43) return;
     jfloat *values = (*env)->GetFloatArrayElements(env, layout, NULL);
     if (!values) return;
-    mobile_input_set_hud_layout(values[0], values[1], values[2], values + 3, 9);
+    mobile_input_set_hud_layout(values[0], values[1], values[2], values + 3, 10);
     (*env)->ReleaseFloatArrayElements(env, layout, values, JNI_ABORT);
 }
 
@@ -502,11 +502,11 @@ Java_org_cricketlegacy_MainActivity_nativeCricketOnHudTouch(JNIEnv* env, jclass 
         // This reports host-shim state immediately after JNI translation. It
         // deliberately does not imply that the original gameplay code sampled it.
         LOGI("[G5_HOST_INPUT] touch_us=%llu adapter_tick=%u phase=%d action=%d pointer=%d "
-             "DIK_RETURN=%u SHIFT=%u LCTRL=%u D=%u S=%u stick=(%.3f,%.3f)",
+             "S=%u D=%u A=%u SHIFT=%u ALT=%u arrows=(up:%u down:%u left:%u right:%u)",
              (unsigned long long)touch_us, telemetry.frame_index,
              telemetry.current_phase, action & 0xFF, pointer_id,
-             g_dik[0x1C], g_dik[0x2A], g_dik[0x1D], g_dik[0x20], g_dik[0x1F],
-             telemetry.joystick_norm_x, telemetry.joystick_norm_y);
+             g_dik[0x1F], g_dik[0x20], g_dik[0x1E], g_dik[0x2A], g_dik[0x38],
+             g_dik[0xC8], g_dik[0xD0], g_dik[0xCB], g_dik[0xCD]);
     }
 }
 
@@ -519,12 +519,13 @@ Java_org_cricketlegacy_MainActivity_nativeCricketRenderFrame(JNIEnv* env, jclass
     // Advance native mobile input frame tick (decrementing stroke pulses, etc.)
     mobile_input_frame_tick();
 
-    // Level 3 Input Assertion Telemetry: Track keys asserted into g_dik
+    // Host-shim telemetry only. g_dik rising edges do not prove gameplay code
+    // sampled a key or executed a cricket action.
     static uint8_t s_prev_dik[256];
     for (int k = 0; k < 256; k++) {
         if (g_dik[k] && !s_prev_dik[k]) {
-            LOGI("[LEVEL3_ENGINE_INPUT_ASSERTED] Key 0x%02X asserted to engine at frame #%u",
-                 k, g_device ? g_device->frame : 0);
+            LOGI("[HOST_DIK_STATE_RISE] key=0x%02X device_frame=%llu (not action evidence)",
+                 k, (unsigned long long)(g_device ? g_device->frame : 0));
         }
         s_prev_dik[k] = g_dik[k];
     }

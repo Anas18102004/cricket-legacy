@@ -84,7 +84,7 @@ static void test_sector_classification(void) {
         { -70.0f, 70.0f, SECTOR_THIRD_MAN, "Third Man / Late Cut", 0xD0 /* DIK_DOWN */ },
         { 0.0f, 100.0f, SECTOR_FINE_LEG, "Fine Leg Glance", 0xD0 /* DIK_DOWN */ },
         { 70.0f, 70.0f, SECTOR_SQUARE_LEG, "Square Leg Flick", 0xCD /* DIK_RIGHT */ },
-        { 100.0f, 0.0f, SECTOR_MID_WICKET, "Mid-Wicket Pull", 0xC8 /* DIK_UP */ },
+        { 100.0f, 0.0f, SECTOR_MID_WICKET, "Mid-Wicket Pull", 0xCD /* DIK_RIGHT */ },
         { 70.0f, -70.0f, SECTOR_MID_ON, "Mid-On Drive", 0xC8 /* DIK_UP */ },
     };
 
@@ -108,13 +108,13 @@ static void test_sector_classification(void) {
                i, cases[i].name, telem.last_stroke.sector, cases[i].expected_sector, telem.last_stroke.angle_deg);
         assert(telem.last_stroke.sector == cases[i].expected_sector);
         assert(s_mock_dik_state[cases[i].primary_key] == 1); // Primary direction key must be down
-        assert(s_mock_dik_state[0x1C] == 1); // Enter shot trigger must be down
+        assert(s_mock_dik_state[0x1F] == 1); // Browser keyboard's normal shot is S.
 
         // Simulate frame ticks to verify clean key release after 6 frames
         for (int f = 0; f < 6; f++) {
             mobile_input_frame_tick();
         }
-        assert(s_mock_dik_state[0x1C] == 0); // Must be released
+        assert(s_mock_dik_state[0x1F] == 0); // Must be released
         assert(s_mock_dik_state[cases[i].primary_key] == 0); // Must be released
     }
     printf("  --> PASS: All 8 directional shot sectors verified!\n\n");
@@ -132,21 +132,19 @@ static void test_joystick_deadzone(void) {
     mobile_input_on_touch(0 /* DOWN */, joy_cx + 5.0f, joy_cy + 5.0f, 0);
     mobile_input_on_touch(2 /* MOVE */, joy_cx + 5.0f, joy_cy + 5.0f, 0);
 
-    assert(s_mock_pad_lx == 0);
-    assert(s_mock_pad_ly == 0);
-    printf("  Sub-deadzone touch (5px): Axis=(%d, %d) -> PASS (Zero output)\n", s_mock_pad_lx, s_mock_pad_ly);
+    assert(s_mock_dik_state[0xCD] == 0);
+    printf("  Sub-deadzone touch (5px): no arrow keys -> PASS\n");
 
     // Touch outside deadzone: 60px right
     mobile_input_on_touch(2 /* MOVE */, joy_cx + 60.0f, joy_cy, 0);
-    assert(s_mock_pad_lx > 5000);
-    printf("  Active range touch (60px): Axis=(%d, %d) -> PASS (Smooth scaled output)\n", s_mock_pad_lx, s_mock_pad_ly);
+    assert(s_mock_dik_state[0xCD] == 1);
+    printf("  Active range touch (60px): DIK_RIGHT asserted -> PASS\n");
 
     // Release joystick
     mobile_input_on_touch(1 /* UP */, joy_cx + 60.0f, joy_cy, 0);
-    assert(s_mock_pad_lx == 0);
-    assert(s_mock_pad_ly == 0);
-    printf("  Joystick release: Axis=(%d, %d) -> PASS (Centered)\n", s_mock_pad_lx, s_mock_pad_ly);
-    printf("  --> PASS: Joystick deadzone and scaling verified!\n\n");
+    assert(s_mock_dik_state[0xCD] == 0);
+    printf("  Joystick release: DIK_RIGHT released -> PASS\n");
+    printf("  --> PASS: Joystick deadzone and digital arrow routing verified!\n\n");
 }
 
 // Test 3: Multi-Touch Pointer Independence (Simultaneous Joystick + Button + Swipe)
@@ -160,7 +158,7 @@ static void test_multitouch_concurrency(void) {
 
     // Pointer 0: Joystick touch (held down)
     mobile_input_on_touch(0 /* DOWN */, joy_cx + 70.0f, joy_cy, 0);
-    assert(s_mock_pad_lx > 0);
+    assert(s_mock_dik_state[0xCD] == 1);
 
     // Pointer 1: Tap LOFT button at the responsive right-side layout location.
     float cluster_x = 1920.0f - 240.0f * scale;
@@ -169,8 +167,8 @@ static void test_multitouch_concurrency(void) {
     float loft_y = cluster_y - 90.0f * scale - 24.0f * scale + 20.0f;
     mobile_input_on_touch(5 /* POINTER_DOWN */, loft_x, loft_y, 1);
     assert(s_mock_dik_state[0x2A] == 1); // DIK_LSHIFT active (Loft enabled)
-    printf("  Pointer 0 (Joystick) + Pointer 1 (LOFT Button) active concurrently: Stick LX=%d, DIK_LSHIFT=%d -> PASS\n",
-           s_mock_pad_lx, s_mock_dik_state[0x2A]);
+    printf("  Pointer 0 (Joystick) + Pointer 1 (SHIFT Button) active concurrently: DIK_RIGHT=%d, DIK_LSHIFT=%d -> PASS\n",
+           s_mock_dik_state[0xCD], s_mock_dik_state[0x2A]);
 
     // Classic mode must not turn an unrelated screen swipe into a shot.
     mobile_input_on_touch(5 /* POINTER_DOWN */, 960.0f, 540.0f, 2);
@@ -179,12 +177,12 @@ static void test_multitouch_concurrency(void) {
     MobileInputTelemetry telem;
     mobile_input_get_telemetry(&telem);
     assert(!telem.last_stroke.valid);
-    assert(s_mock_dik_state[0x1C] == 0);
+    assert(s_mock_dik_state[0x1F] == 0);
     printf("  Classic joystick mode ignores unrelated swipe -> PASS\n");
 
     // Release Pointer 0
     mobile_input_on_touch(1 /* UP */, joy_cx + 70.0f, joy_cy, 0);
-    assert(s_mock_pad_lx == 0);
+    assert(s_mock_dik_state[0xCD] == 0);
     printf("  --> PASS: Multi-touch isolation and concurrent processing verified!\n\n");
 }
 
@@ -196,29 +194,48 @@ static void test_user_context_button_routing(void) {
     mobile_input_configure(&config);
     memset(s_mock_dik_state, 0, sizeof(s_mock_dik_state));
 
-    float scale = 1.4f;
-    float cluster_x = 1920.0f - 240.0f * scale;
-    float cluster_y = 1080.0f - 340.0f * scale;
-    float btn = 90.0f * scale;
-    float gap = 24.0f * scale;
+    float rects[10 * 4];
+    for (int i = 0; i < 10; i++) {
+        rects[i * 4 + 0] = 100.0f + (float)i * 100.0f;
+        rects[i * 4 + 1] = 100.0f;
+        rects[i * 4 + 2] = 80.0f;
+        rects[i * 4 + 3] = 80.0f;
+    }
+    mobile_input_set_hud_layout(500.0f, 700.0f, 90.0f, rects, 10);
+    mobile_input_set_game_phase(GAME_PHASE_BATTING);
+    mobile_input_on_touch(0, 240.0f, 140.0f, 0); /* id 2: D */
+    assert(s_mock_dik_state[0x20] == 1);
+    mobile_input_on_touch(1, 240.0f, 140.0f, 0);
+    mobile_input_on_touch(0, 340.0f, 140.0f, 0); /* id 3: S */
+    assert(s_mock_dik_state[0x1F] == 1);
+    mobile_input_on_touch(1, 340.0f, 140.0f, 0);
+    mobile_input_on_touch(0, 140.0f, 140.0f, 0); /* id 1: Shift latch */
+    assert(s_mock_dik_state[0x2A] == 1);
+    mobile_input_set_game_phase(GAME_PHASE_MENU);
+    assert(s_mock_dik_state[0x2A] == 0);
 
     mobile_input_set_game_phase(GAME_PHASE_RUNNING);
-    mobile_input_on_touch(0, cluster_x + btn * 0.5f, cluster_y + btn * 0.5f, 0);
+    mobile_input_on_touch(0, 440.0f, 140.0f, 0); /* id 4: D / RUN */
     assert(s_mock_dik_state[0x20] == 1); // Candidate RUN binding reaches host DIK injection.
-    mobile_input_on_touch(1, cluster_x + btn * 0.5f, cluster_y + btn * 0.5f, 0);
+    mobile_input_on_touch(1, 440.0f, 140.0f, 0);
     assert(s_mock_dik_state[0x20] == 0);
-    assert(s_mock_dik_state[0x1F] == 0);
+    mobile_input_on_touch(0, 540.0f, 140.0f, 0); /* id 5: A / CANCEL */
+    assert(s_mock_dik_state[0x1E] == 1);
+    mobile_input_on_touch(1, 540.0f, 140.0f, 0);
+    assert(s_mock_dik_state[0x1E] == 0);
 
     mobile_input_set_game_phase(GAME_PHASE_BOWLING);
-    float standard_x = cluster_x - btn - gap + btn * 0.5f;
-    float standard_y = cluster_y - btn - gap + btn * 0.5f;
-    mobile_input_on_touch(0, standard_x, standard_y, 0);
-    assert(s_mock_dik_state[0x1F] == 1); // Candidate standard-bowl binding.
-    mobile_input_on_touch(1, standard_x, standard_y, 0);
-    assert(s_mock_dik_state[0x1F] == 0);
+    const int expected_keys[5] = {0x1F, 0x1E, 0x20, 0x2A, 0x38};
+    for (int i = 0; i < 5; i++) {
+        float x = 640.0f + (float)i * 100.0f;
+        mobile_input_on_touch(0, x + 40.0f, 140.0f, 0);
+        assert(s_mock_dik_state[expected_keys[i]] == 1);
+        mobile_input_on_touch(1, x + 40.0f, 140.0f, 0);
+        assert(s_mock_dik_state[expected_keys[i]] == 0);
+    }
 
     mobile_input_set_game_phase(GAME_PHASE_MENU);
-    mobile_input_on_touch(0, standard_x, standard_y, 0);
+    mobile_input_on_touch(0, 640.0f, 140.0f, 0);
     assert(s_mock_dik_state[0x1F] == 0);
     printf("  RUN/bowling controls route to host input; menu context stays closed -> PASS\n\n");
 }
@@ -230,9 +247,9 @@ static void test_cancel_and_context_change_release_inputs(void) {
     float joy_x = 325.0f * scale;
     float joy_y = 1080.0f - 305.0f * scale;
     mobile_input_on_touch(0, joy_x + 70.0f, joy_y, 0);
-    assert(s_mock_pad_lx > 0);
+    assert(s_mock_dik_state[0xCD] == 1);
     mobile_input_on_touch(3 /* ACTION_CANCEL */, joy_x + 70.0f, joy_y, 0);
-    assert(s_mock_pad_lx == 0 && s_mock_pad_ly == 0);
+    assert(s_mock_dik_state[0xCD] == 0);
 
     mobile_input_set_game_phase(GAME_PHASE_RUNNING);
     float cluster_x = 1920.0f - 240.0f * scale;
@@ -242,7 +259,7 @@ static void test_cancel_and_context_change_release_inputs(void) {
     assert(s_mock_dik_state[0x20] == 1);
     mobile_input_set_game_phase(GAME_PHASE_MENU);
     assert(s_mock_dik_state[0x20] == 0);
-    assert(s_mock_pad_lx == 0 && s_mock_pad_ly == 0);
+    assert(s_mock_dik_state[0xCD] == 0);
     printf("  ACTION_CANCEL and context change release joystick/key states -> PASS\n\n");
 }
 
@@ -250,19 +267,19 @@ static void test_android_viewport_layout_is_used_for_hit_testing(void) {
     printf("--- [TEST 6] Android Viewport Layout Drives Native Hit Tests ---\n");
     prepare_batting_input(BATTING_MODE_CLASSIC_JOYSTICK);
 
-    float rects[9 * 4];
-    for (int i = 0; i < 9; i++) {
+    float rects[10 * 4];
+    for (int i = 0; i < 10; i++) {
         rects[i * 4 + 0] = 700.0f + (float)(i % 3) * 100.0f;
         rects[i * 4 + 1] = 600.0f + (float)(i / 3) * 100.0f;
         rects[i * 4 + 2] = 80.0f;
         rects[i * 4 + 3] = 80.0f;
     }
-    mobile_input_set_hud_layout(350.0f, 780.0f, 60.0f, rects, 9);
+    mobile_input_set_hud_layout(350.0f, 780.0f, 60.0f, rects, 10);
 
     mobile_input_on_touch(0, 400.0f, 780.0f, 0);
-    assert(s_mock_pad_lx > 10000);
+    assert(s_mock_dik_state[0xCD] == 1);
     mobile_input_on_touch(1, 400.0f, 780.0f, 0);
-    assert(s_mock_pad_lx == 0 && s_mock_pad_ly == 0);
+    assert(s_mock_dik_state[0xCD] == 0);
 
     // The injected RUN rectangle is at x=700,y=700, independent of defaults.
     mobile_input_set_game_phase(GAME_PHASE_RUNNING);

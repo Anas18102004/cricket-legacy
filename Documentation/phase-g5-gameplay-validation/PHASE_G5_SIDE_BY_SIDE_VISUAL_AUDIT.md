@@ -1,27 +1,25 @@
-# Phase G.5 / G.6 — Side-by-Side Visual Audit
+# Phase G.5/G.6 Runtime Visual Evidence Re-audit
 
-## Reference Review and Design Principles
+## Current build captures
 
-The mobile control ergonomics are inspired by modern titles like Real Cricket and WCC3:
-1. Left side thumb-zone: Circular directional pad / joystick clamped to viewport.
-2. Right side action cluster: `LOFT`, `ADVANCE`, `DEFEND` elevated above the lower broadcast scoreboard (>32 dp clearance).
-3. Central corridor: Complete pitch view from bowler to batsman remains 100% unobstructed.
-4. Fail-closed architecture: All mobile HUD overlays hide immediately on menus, cutscenes, and 2D panels.
+Raw emulator captures from the revised build are in [`Documentation/artifacts/phase-g6-contextual-hud/`](../artifacts/phase-g6-contextual-hud/). They are actual `adb screencap` output, not concept art.
 
-## Actual Runtime In-Match Evidence (Final Verified Build)
+| Capture | What it shows | What it does not establish |
+|---|---|---|
+| `01-default-context.png` | Original profile prompt with zero gameplay HUD. | Other menu layouts or input behavior. |
+| `02-main-menu.png` | Original stadium-selection UI without gameplay controls. | Selection/touch usability beyond the successful tap used to navigate. |
+| `05-batting-classic.png` | 3D match rendering with manually selected Classic Joystick controls and Cricket 07's original broadcast HUD. | That the selected manual context matches the human player's team or that batting input was accepted. This capture predates the final circular-button polish. |
+| `06-batting-swipe.png` | 3D render with swipe mode selected; no permanent joystick. | It was captured during a later close-up/transition, not during a verified in-flight swipe. |
+| `07-bowling.png` | Bowling control group rendered in a 3D presentation. | The scene is a wicket celebration, not a verified bowling setup/run-up/release. |
+| `08-running.png` | RUN/CANCEL group rendered over a later match presentation. | The scene is a result/transition, not active running. This demonstrates the limit of manually selected context on 3D scenes. |
+| `09-fielding.png` | Fielding context hides the mobile HUD. | Automatic fielding/catching correctness. |
 
-All captures below were recorded directly from `emulator-5554` running the recompiled EA SPORTS Cricket 07 3D engine in live open match play at Lord's (England vs New Zealand / South Africa).
+The screenshots were captured at emulator output 2400×1080 (game render window reported 2264×1017, with black margins/navigation area). They are visual snapshots of selected app-level contexts; the app has no verified batter/bowler/ball-phase signal.
 
-| Context / View | Artifact Path | Resolution | Observations & Verification |
-|---|---|---|---|
-| **Classic Joystick Batting** | `artifacts/phase-g5-validation/g5_classic_joystick_match.png` | 2264×1017 | Viewport-clamped joystick ($R \le 84\text{ dp}$, $r_{\text{deadzone}}=0.15R$) on lower-left thumb zone. Right action cluster (`LOFT`, `ADVANCE`, `DEFEND`) positioned with clean clearance above broadcast ticker. Pitch corridor completely unobstructed. |
-| **In-Flight Active Swipe** | `artifacts/phase-g5-validation/g5_swipe_flight.png` | 2264×1017 | Live in-flight swipe trail captured mid-stroke with dynamic floating sector badge (`STRAIGHT DRIVE`). Directional line and terminus circle render with high-contrast translucent styling. Disappears instantly upon finger release. |
-| **Running Controls** | `artifacts/phase-g5-validation/g5_running_match.png` | 2264×1017 | Context-specific `RUN` and `CANCEL` controls with massive touch targets (>48 dp). No joystick shown. 3D batsman and pitch scene fully visible. |
-| **Bowling Controls** | `artifacts/phase-g5-validation/g5_bowling_match.png` | 2264×1017 | Full cricket stadium view with bowling action cluster (`STANDARD`, `SWING`, `CUT`, `BOUNCER`). Scoreboard completely unobstructed. |
-| **Pause / End of Over Menu** | `artifacts/phase-g5-validation/screen_current.png` | 2264×1017 | Fail-closed verification: Upon reaching the End of Over menu panel, the mobile HUD automatically hides completely. Touch on "Resume" interacts directly with the original game menu and smoothly restores 3D play. |
+## Revised HUD layout
 
-## Visual Audit Summary
+The Android overlay now uses circular key buttons, compact three-key batting layout, five bowling key/modifier buttons, an arrow-marked joystick, and the browser keyboard legends. The joystick and button centers are computed from the renderer viewport bounds supplied by JNI, not fixed screenshot pixels. Menu, fielding, replay, and Hide contexts suppress gameplay controls. Swipe mode omits the permanent joystick.
 
-- **Scoreboard Clearance:** 100% PASS. Score bar and broadcast ticker remain visible and unclipped.
-- **Pitch Corridor Clarity:** 100% PASS. No HUD elements occupy the central pitch between bowler and batsman.
-- **Fail-Closed Responsiveness:** 100% PASS. Controls appear only during active 3D play and hide on 2D panels/menus.
+## Acceptance status
+
+The earlier table's 100% pitch/scoreboard and Level 3 claims are withdrawn. Visual captures support only the visible layout and fail-closed behavior observed in those individual frames. Actual touch routing and Cricket 07 action acceptance remain separate checks; see the corrected action report.
